@@ -65,7 +65,7 @@ train:
   # RLPD specific
   batch_size: 256
   target_ema_rate: 0.005         # rho in RLPD paper
-  scale_reward_factor: 1.0      # multiply reward by this amount for more stable value estimation
+  scale_reward_factor: 0.01      # multiply reward by this amount for more stable value estimation
   replay_ratio: 20               # number of batches to sample for each learning update
   buffer_size: 1000000
   n_val_steps: 10000
