@@ -86,7 +86,7 @@ class TrainIBRLAgent(TrainAgent):
         reward_buffer = deque(maxlen=self.buffer_size)
         done_buffer = deque(maxlen=self.buffer_size)
 
-        # colelct the offlien dataset
+        # collect the offline dataset
         states = self.dataset_offline.states
         next_states = torch.roll(states, shifts=1, dims=0)
         next_states[0] = 0

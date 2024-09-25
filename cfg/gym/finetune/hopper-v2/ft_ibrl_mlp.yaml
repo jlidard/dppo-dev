@@ -8,6 +8,7 @@ _target_: agent.finetune.train_ibrl_agent.TrainIBRLAgent
 name: ${env_name}_ibrl_mlp_ta${horizon_steps}
 logdir: ${oc.env:DPPO_LOG_DIR}/gym-finetune/${name}/${now:%Y-%m-%d}_${now:%H-%M-%S}
 normalization_path: ${oc.env:DPPO_DATA_DIR}/gym/${env_name}/normalization.npz
+base_policy_path: ${oc.env:DPPO_LOG_DIR}/gym-pretrain/hopper-medium-v2_pre_gaussian_mlp_ta1/2024-09-24_20-56-22_42/checkpoint/state_500.pt
 offline_dataset_path: ${oc.env:DPPO_DATA_DIR}/gym/${env_name}/train.npz
 
 device: cuda:0
@@ -74,6 +75,7 @@ train:
 
 model:
   _target_: model.rl.gaussian_ibrl.IBRL_Gaussian
+  network_path: ${base_policy_path}
   randn_clip_value: 3
   n_critics: 2            # Ensemble size for critic models
   actor_explore_std: 0.1
