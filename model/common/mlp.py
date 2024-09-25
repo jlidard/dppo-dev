@@ -26,7 +26,6 @@ activation_dict = nn.ModuleDict(
 
 
 class MLP(nn.Module):
-
     def __init__(
         self,
         dim_list,
@@ -37,6 +36,8 @@ class MLP(nn.Module):
         use_layernorm=False,
         use_spectralnorm=False,
         use_layernorm_final=False,
+        use_dropout=False,
+        dropout_rate=0.1,
         verbose=False,
     ):
         super(MLP, self).__init__()
@@ -71,6 +72,16 @@ class MLP(nn.Module):
                             [
                                 ("linear_1", linear_layer),
                                 ("norm_1", nn.LayerNorm(o_dim)),
+                                ("act_1", activation_dict[activation_type]),
+                            ]
+                        )
+                    )
+                elif use_dropout:
+                    module = nn.Sequential(
+                        OrderedDict(
+                            [
+                                ("linear_1", linear_layer),
+                                ("dropout", nn.Dropout(dropout_rate)),
                                 ("act_1", activation_dict[activation_type]),
                             ]
                         )

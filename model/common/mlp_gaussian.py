@@ -97,7 +97,9 @@ class Gaussian_VisionMLP(nn.Module):
             )
         elif learn_fixed_std:  # initialize to fixed_std
             self.logvar = torch.nn.Parameter(
-                torch.log(torch.tensor([fixed_std**2 for _ in range(transition_dim)])),
+                torch.log(
+                    torch.tensor([fixed_std**2 for _ in range(transition_dim)])
+                ),
                 requires_grad=True,
             )
         self.logvar_min = torch.nn.Parameter(
@@ -188,6 +190,8 @@ class Gaussian_MLP(nn.Module):
         activation_type="Mish",
         residual_style=False,
         use_layernorm=False,
+        use_dropout=False,
+        dropout_rate=0.1,
         fixed_std=None,
         learn_fixed_std=False,
         std_min=0.01,
@@ -226,7 +230,10 @@ class Gaussian_MLP(nn.Module):
                 activation_type=activation_type,
                 out_activation_type="Identity",
                 use_layernorm=use_layernorm,
+                use_dropout=use_dropout,
+                dropout_rate=dropout_rate,
             )
+            print(self.mlp_mean)
             if learn_fixed_std:
                 # initialize to fixed_std
                 self.logvar = torch.nn.Parameter(
