@@ -164,7 +164,6 @@ class StitchedTransitionDataset(StitchedSequenceDataset):
             use_img,
             device,
         )
-
         if clip_to_eps:
             lim = 1 - eps
             self.actions = torch.clip(self.actions, -lim, lim)
