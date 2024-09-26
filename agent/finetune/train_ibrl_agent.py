@@ -69,7 +69,7 @@ class TrainIBRLAgent(TrainAgent):
         self.scale_reward_factor = cfg.train.scale_reward_factor
 
         # Gradient steps per sample
-        self.replay_ratio = cfg.train.replay_ratio
+        self.critic_num_update = cfg.train.critic_num_update
 
         # Buffer size
         self.buffer_size = cfg.train.buffer_size
@@ -220,7 +220,7 @@ class TrainIBRLAgent(TrainAgent):
                 and self.itr > self.n_explore_steps
                 and self.itr % self.update_freq == 0
             ):
-                num_batch = int(n_steps * self.n_envs * self.replay_ratio)
+                num_batch = int(n_steps * self.n_envs * self.critic_num_update)
 
                 # Actor-critic learning
                 for _ in range(num_batch):
