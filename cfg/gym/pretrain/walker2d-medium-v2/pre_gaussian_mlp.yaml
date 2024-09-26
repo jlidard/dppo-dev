@@ -10,7 +10,7 @@ logdir: ${oc.env:DPPO_LOG_DIR}/gym-pretrain/${name}/${now:%Y-%m-%d}_${now:%H-%M-
 train_dataset_path: ${oc.env:DPPO_DATA_DIR}/gym/${env}/train.npz
 
 seed: 42
-device: cuda:0
+device: cuda:1
 env: walker2d-medium-v2
 obs_dim: 17
 action_dim: 6
