@@ -15,7 +15,7 @@ import random
 log = logging.getLogger(__name__)
 
 Batch = namedtuple("Batch", "actions conditions")
-Transition = namedtuple("Transition", "actions conditions rewards dones")
+Transition = namedtuple("Transition", "actions conditions rewards dones reward_to_gos")
 
 
 class StitchedSequenceDataset(torch.utils.data.Dataset):
@@ -199,6 +199,16 @@ class StitchedSequenceQLearningDataset(StitchedSequenceDataset):
         log.info(f"Number of transitions skipped due to truncation: {num_skip}")
         return indices
 
+        # compute reward to go for each trajectory
+        self.reward_to_go = torch.zeros_like(self.rewards)
+        prev_traj_length = 0
+        for i, traj_length in enumerate(cumulative_traj_length):
+            returns = torch.cumsum(self.rewards[prev_traj_length:traj_length], dim=0)
+            self.reward_to_go[prev_traj_length : traj_length - 1] = torch.flip(
+                returns, [0]
+            )[1:]
+            prev_traj_length = traj_length
+
     def __getitem__(self, idx):
         start, num_before_start = self.indices[idx]
         end = start + self.horizon_steps
@@ -206,6 +216,7 @@ class StitchedSequenceQLearningDataset(StitchedSequenceDataset):
         actions = self.actions[start:end]
         rewards = self.rewards[start : (start + 1)]
         dones = self.dones[start : (start + 1)]
+        reward_to_gos = self.reward_to_go[start : (start + 1)]
 
         # Account for action horizon
         if idx < len(self.indices) - self.horizon_steps:
@@ -241,5 +252,5 @@ class StitchedSequenceQLearningDataset(StitchedSequenceDataset):
                 ]
             )
             conditions["rgb"] = images
-        batch = Transition(actions, conditions, rewards, dones)
+        batch = Transition(actions, conditions, rewards, dones, reward_to_gos)
         return batch
