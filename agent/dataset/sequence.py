@@ -15,7 +15,7 @@ import random
 log = logging.getLogger(__name__)
 
 Batch = namedtuple("Batch", "actions conditions")
-Transition = namedtuple("Transition", "actions conditions rewards dones")
+Transition = namedtuple("Transition", "actions conditions rewards dones reward_to_gos")
 
 
 class StitchedSequenceDataset(torch.utils.data.Dataset):
@@ -191,6 +191,16 @@ class StitchedSequenceQLearningDataset(StitchedSequenceDataset):
             self.dones[traj_length - 1] = 1
         log.info(f"Dones shape/type: {self.dones.shape, self.dones.dtype}")
 
+        # compute reward to go for each trajectory
+        self.reward_to_go = torch.zeros_like(self.rewards)
+        prev_traj_length = 0
+        for i, traj_length in enumerate(cumulative_traj_length):
+            returns = torch.cumsum(self.rewards[prev_traj_length:traj_length], dim=0)
+            self.reward_to_go[prev_traj_length : traj_length - 1] = torch.flip(
+                returns, [0]
+            )[1:]
+            prev_traj_length = traj_length
+
     def __getitem__(self, idx):
         # Sample a transition that includes rewards and dones.
         # We take the last reward and done for the action chunk as the reward and done for the transition.
@@ -200,6 +210,7 @@ class StitchedSequenceQLearningDataset(StitchedSequenceDataset):
         actions = self.actions[start:end]
         rewards = self.rewards[start:end][-1:]
         dones = self.dones[start:end][-1:]
+        reward_to_gos = self.reward_to_go[start:end][-1:]
 
         # Note: for self.horizon_steps > 1, we need to include the action chunk in the environment dynamics.
         # The next state is the state at the end of the action chunk. Therefore, when we index,
@@ -239,5 +250,5 @@ class StitchedSequenceQLearningDataset(StitchedSequenceDataset):
                 ]
             )
             conditions["rgb"] = images
-        batch = Transition(actions, conditions, rewards, dones)
+        batch = Transition(actions, conditions, rewards, dones, reward_to_gos)
         return batch
