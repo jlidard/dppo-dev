@@ -11,10 +11,10 @@ import torch
 import logging
 import wandb
 import hydra
+from collections import deque
 
 log = logging.getLogger(__name__)
 from util.timer import Timer
-from collections import deque
 from agent.finetune.train_agent import TrainAgent
 from util.scheduler import CosineAnnealingWarmupRestarts
 
@@ -28,9 +28,6 @@ class TrainIBRLAgent(TrainAgent):
 
         # note the discount factor gamma here is applied to reward every act_steps, instead of every env step
         self.gamma = cfg.train.gamma
-
-        # Wwarm up period for critic before actor updates
-        self.n_critic_warmup_itr = cfg.train.n_critic_warmup_itr
 
         # Optimizer
         self.actor_optimizer = torch.optim.AdamW(
@@ -68,15 +65,20 @@ class TrainIBRLAgent(TrainAgent):
         # Reward scale
         self.scale_reward_factor = cfg.train.scale_reward_factor
 
-        # Gradient steps per sample
+        # Number of critic updates
         self.critic_num_update = cfg.train.critic_num_update
+
+        # Update frequency
+        self.update_freq = cfg.train.update_freq
 
         # Buffer size
         self.buffer_size = cfg.train.buffer_size
 
-        self.n_val_steps = cfg.train.n_val_steps
+        # Eval episodes
+        self.n_eval_episode = cfg.train.n_eval_episode
+
+        # Exploration steps at the beginning - using randomly sampled action
         self.n_explore_steps = cfg.train.n_explore_steps
-        self.update_freq = cfg.train.update_freq
 
     def run(self):
         # make a FIFO replay buffer for obs, action, and reward
@@ -104,7 +106,6 @@ class TrainIBRLAgent(TrainAgent):
         # Start training loop
         timer = Timer()
         run_results = []
-        last_itr_eval = False
         done_venv = np.zeros((1, self.n_envs))
         while self.itr < self.n_train_itr:
             if self.itr % 1000 == 0:
@@ -119,46 +120,48 @@ class TrainIBRLAgent(TrainAgent):
                     )
 
             # Define train or eval - all envs restart
-            eval_mode = self.itr % self.val_freq == 0 and not self.force_train
-            n_steps = self.n_steps if not eval_mode else self.n_val_steps
+            eval_mode = (
+                self.itr % self.val_freq == 0
+                and self.itr > self.n_explore_steps
+                and not self.force_train
+            )
+            n_steps = (
+                self.n_steps if not eval_mode else int(1e5)
+            )  # large number for eval mode
             self.model.eval() if eval_mode else self.model.train()
-            last_itr_eval = eval_mode
 
-            # Reset env before iteration starts (1) if specified, (2) at eval mode, or (3) right after eval mode
-            firsts_trajs = np.zeros((n_steps + 1, self.n_envs))
-            if self.reset_at_iteration or eval_mode or last_itr_eval:
+            # Reset env before iteration starts (1) if specified, (2) at eval mode, or (3) at the beginning
+            firsts_trajs = np.empty((0, self.n_envs))
+            if self.reset_at_iteration or eval_mode or self.itr == 0:
                 prev_obs_venv = self.reset_env_all(options_venv=options_venv)
-                firsts_trajs[0] = 1
+                firsts_trajs = np.vstack((firsts_trajs, np.ones((1, self.n_envs))))
             else:
                 # if done at the end of last iteration, then the envs are just reset
-                firsts_trajs[0] = done_venv
+                firsts_trajs = np.vstack((firsts_trajs, done_venv))
             reward_trajs = np.empty((0, self.n_envs))
 
             # Collect a set of trajectories from env
-            for step in range(n_steps):
-                # if step % 100 == 0 and eval_mode:
-                #     print(f"Processed step {step} of {n_steps}")
+            cnt_episode = 0
+            for _ in range(n_steps):
 
                 # Select action
-                with torch.no_grad():
-                    cond = {
-                        "state": torch.from_numpy(prev_obs_venv["state"])
-                        .float()
-                        .to(self.device)
-                    }
-                    samples = (
-                        self.model(
-                            cond=cond,
-                            deterministic=eval_mode,
-                        )
-                        .cpu()
-                        .numpy()
-                    )  # n_env x horizon x act
-
-                # sample random action from action space if
                 if self.itr < self.n_explore_steps:
                     action_venv = self.venv.action_space.sample()
                 else:
+                    with torch.no_grad():
+                        cond = {
+                            "state": torch.from_numpy(prev_obs_venv["state"])
+                            .float()
+                            .to(self.device)
+                        }
+                        samples = (
+                            self.model(
+                                cond=cond,
+                                deterministic=eval_mode,
+                            )
+                            .cpu()
+                            .numpy()
+                        )  # n_env x horizon x act
                     action_venv = samples[:, : self.act_steps]
 
                 # Apply multi-step action
@@ -167,15 +170,23 @@ class TrainIBRLAgent(TrainAgent):
                 )
                 reward_trajs = np.vstack((reward_trajs, reward_venv[None]))
 
-                for i in range(self.n_envs):
-                    if not eval_mode:
+                # add to buffer in train mode
+                if not eval_mode:
+                    for i in range(self.n_envs):
                         obs_buffer.append(prev_obs_venv["state"][i])
                         next_obs_buffer.append(obs_venv["state"][i])
                         action_buffer.append(action_venv[i])
                         reward_buffer.append(reward_venv[i] * self.scale_reward_factor)
                         done_buffer.append(done_venv[i])
-                firsts_trajs[step + 1] = done_venv
+                firsts_trajs = np.vstack(
+                    (firsts_trajs, done_venv)
+                )  # offset by one step
                 prev_obs_venv = obs_venv
+
+                # check if enough eval episodes are done
+                cnt_episode += np.sum(done_venv)
+                if eval_mode and cnt_episode >= self.n_eval_episode:
+                    break
 
             # Summarize episode reward --- this needs to be handled differently depending on whether the environment is reset after each iteration. Only count episodes that finish within the iteration.
             episodes_start_end = []
@@ -212,7 +223,6 @@ class TrainIBRLAgent(TrainAgent):
                 avg_episode_reward = 0
                 avg_best_reward = 0
                 success_rate = 0
-                # log.info("[WARNING] No episode completed within the iteration!")
 
             # Update models
             if (
@@ -220,40 +230,29 @@ class TrainIBRLAgent(TrainAgent):
                 and self.itr > self.n_explore_steps
                 and self.itr % self.update_freq == 0
             ):
-                num_batch = int(n_steps * self.n_envs * self.critic_num_update)
+                obs_array = np.array(obs_buffer)
+                next_obs_array = np.array(next_obs_buffer)
+                actions_array = np.array(action_buffer)
+                rewards_array = np.array(reward_buffer)
+                dones_array = np.array(done_buffer)
 
-                # Actor-critic learning
-                for _ in range(num_batch):
-                    # Sample batch from replay buffer
+                # Update critic more frequently
+                for _ in range(self.critic_num_update):
+                    # Sample from online buffer
                     inds = np.random.choice(len(obs_buffer), self.batch_size)
-                    obs_b = (
-                        torch.from_numpy(np.array([obs_buffer[i] for i in inds]))
-                        .float()
-                        .to(self.device)
-                    )
+                    obs_b = torch.from_numpy(obs_array[inds]).float().to(self.device)
                     next_obs_b = (
-                        torch.from_numpy(np.array([next_obs_buffer[i] for i in inds]))
-                        .float()
-                        .to(self.device)
+                        torch.from_numpy(next_obs_array[inds]).float().to(self.device)
                     )
                     actions_b = (
-                        torch.from_numpy(np.array([action_buffer[i] for i in inds]))
-                        .float()
-                        .to(self.device)
+                        torch.from_numpy(actions_array[inds]).float().to(self.device)
                     )
                     rewards_b = (
-                        torch.from_numpy(
-                            np.array([reward_buffer[i][None] for i in inds])
-                        )
-                        .float()
-                        .to(self.device)
+                        torch.from_numpy(rewards_array[inds]).float().to(self.device)
                     )
                     dones_b = (
-                        torch.from_numpy(np.array([done_buffer[i][None] for i in inds]))
-                        .float()
-                        .to(self.device)
+                        torch.from_numpy(dones_array[inds]).float().to(self.device)
                     )
-
                     # Update critic
                     loss_critic = self.model.loss_critic(
                         {"state": obs_b},
@@ -267,22 +266,16 @@ class TrainIBRLAgent(TrainAgent):
                     loss_critic.backward()
                     self.critic_optimizer.step()
 
-                    # Update target critic
+                    # Update target critic every critic update
                     self.model.update_target_critic(self.target_ema_rate)
 
-                # Update actor with the final batch
-                actor_loss = self.model.loss_actor(
+                # Update actor once with the final batch
+                loss_actor = self.model.loss_actor(
                     {"state": obs_b},
                 )
                 self.actor_optimizer.zero_grad()
-                actor_loss.backward()
-                if self.itr >= self.n_critic_warmup_itr:
-                    if self.max_grad_norm is not None:
-                        torch.nn.utils.clip_grad_norm_(
-                            self.model.actor.parameters(), self.max_grad_norm
-                        )
-                    self.actor_optimizer.step()
-                loss = actor_loss
+                loss_actor.backward()
+                self.actor_optimizer.step()
 
                 # Update target actor
                 self.model.update_target_actor(self.target_ema_rate)
@@ -296,11 +289,7 @@ class TrainIBRLAgent(TrainAgent):
                 self.save_model()
 
             # Log loss and save metrics
-            run_results.append(
-                {
-                    "itr": self.itr,
-                }
-            )
+            run_results.append({"itr": self.itr})
             if self.itr % self.log_freq == 0 and self.itr > self.n_explore_steps:
                 time = timer()
                 if eval_mode:
@@ -323,12 +312,12 @@ class TrainIBRLAgent(TrainAgent):
                     run_results[-1]["eval_best_reward"] = avg_best_reward
                 else:
                     log.info(
-                        f"{self.itr}: loss {loss:8.4f} | reward {avg_episode_reward:8.4f} |t:{time:8.4f}"
+                        f"{self.itr}: loss actor {loss_actor:8.4f} | loss critic {loss_critic:8.4f} | reward {avg_episode_reward:8.4f} |t:{time:8.4f}"
                     )
                     if self.use_wandb:
                         wandb.log(
                             {
-                                "loss": loss,
+                                "loss - actor": loss_actor,
                                 "loss - critic": loss_critic,
                                 "avg episode reward - train": avg_episode_reward,
                                 "num episode - train": num_episode_finished,
@@ -336,7 +325,7 @@ class TrainIBRLAgent(TrainAgent):
                             step=self.itr,
                             commit=True,
                         )
-                    run_results[-1]["loss"] = loss
+                    run_results[-1]["loss_actor"] = loss_actor
                     run_results[-1]["loss_critic"] = loss_critic
                     run_results[-1]["train_episode_reward"] = avg_episode_reward
                 run_results[-1]["time"] = time
