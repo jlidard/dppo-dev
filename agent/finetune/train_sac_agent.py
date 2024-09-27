@@ -62,8 +62,12 @@ class TrainSACAgent(TrainAgent):
         self.scale_reward_factor = cfg.train.scale_reward_factor
 
         # Actor/critic update frequency - assume single env
-        self.critic_update_freq = int(cfg.train.batch_size / cfg.train.critic_replay_ratio)
-        self.actor_update_freq = int(cfg.train.batch_size / cfg.train.actor_replay_ratio)
+        self.critic_update_freq = int(
+            cfg.train.batch_size / cfg.train.critic_replay_ratio
+        )
+        self.actor_update_freq = int(
+            cfg.train.batch_size / cfg.train.actor_replay_ratio
+        )
 
         # Buffer size
         self.buffer_size = cfg.train.buffer_size
@@ -215,10 +219,12 @@ class TrainSACAgent(TrainAgent):
                 success_rate = 0
 
             # Update models
-            if not eval_mode and self.itr > self.n_explore_steps and self.itr % self.critic_update_freq == 0:
-                inds = np.random.choice(
-                    len(obs_buffer), self.batch_size, replace=False
-                )
+            if (
+                not eval_mode
+                and self.itr > self.n_explore_steps
+                and self.itr % self.critic_update_freq == 0
+            ):
+                inds = np.random.choice(len(obs_buffer), self.batch_size, replace=False)
                 obs_b = (
                     torch.from_numpy(np.array([obs_buffer[i] for i in inds]))
                     .float()

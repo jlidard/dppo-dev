@@ -41,8 +41,7 @@ wandb:
   run: ${now:%H-%M-%S}_${name}
 
 train:
-  n_train_itr: 1000000
-  n_critic_warmup_itr: 0
+  n_train_itr: 250000
   n_steps: 1
   gamma: 0.99
   actor_lr: 1e-4
@@ -57,51 +56,44 @@ train:
     first_cycle_steps: 1000
     warmup_steps: 10
     min_lr: 1e-4
-  save_model_freq: 10000
-  val_freq: 1000
+  save_model_freq: 50000
+  val_freq: 5000
   render:
     freq: 1
     num: 0
   log_freq: 200
   # IBRL specific
   batch_size: 256
-  target_ema_rate: 0.005         
-  scale_reward_factor: 0.1      
-  critic_num_update: 1
+  target_ema_rate: 0.01        
+  scale_reward_factor: 0.1
+  critic_num_update: 5
   buffer_size: 1000000
-  n_val_steps: 10000
-  n_explore_steps: 0 
+  n_eval_episode: 10
+  n_explore_steps: 0
   update_freq: 2
 
 model:
   _target_: model.rl.gaussian_ibrl.IBRL_Gaussian
   network_path: ${base_policy_path}
   randn_clip_value: 3
-  n_critics: 2            # Ensemble size for critic models
-  actor_explore_std: 0.1
-  critic_clip_c: 0.3
-  soft_action_sample: False
+  n_critics: 5            # Ensemble size for critic models
+  soft_action_sample: True
   soft_action_sample_beta: 0.1
   actor:
     _target_: model.common.mlp_gaussian.Gaussian_MLP
     mlp_dims: [256, 256]
     activation_type: ReLU
-    residual_style: False
     cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
     horizon_steps: ${horizon_steps}
     transition_dim: ${action_dim}
-    std_max: ${model.actor_explore_std}
-    std_min: ${model.actor_explore_std}
-    # fixed_std: ${actor_explore_std}
-    use_dropout: True
-    dropout_rate: 0.5
-    # learn_fixed_std: True
+    fixed_std: 0.1
+    # dropout: 0.5
   critic:
     _target_: model.common.critic.CriticObsAct
     mlp_dims: [256, 256]
     activation_type: ReLU
-    residual_style: False
     use_layernorm: True
+    double_q: False # use ensemble
     cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
     action_dim: ${action_dim}
     action_steps: ${act_steps}
@@ -109,7 +101,7 @@ model:
   device: ${device}
 
 offline_dataset:
-  _target_: agent.dataset.sequence.StitchedTransitionDataset
+  _target_: agent.dataset.sequence.StitchedSequenceQLearningDataset
   dataset_path: ${offline_dataset_path}
   horizon_steps: ${horizon_steps}
   cond_steps: ${cond_steps}
