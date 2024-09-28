@@ -22,6 +22,7 @@ class CalQL_Gaussian(GaussianModel):
         cql_clip_diff_min=-np.inf,
         cql_clip_diff_max=np.inf,
         cql_min_q_weight=5.0,
+        actor_critic_path=None,
         **kwargs,
     ):
         super().__init__(network=actor, **kwargs)
@@ -35,6 +36,16 @@ class CalQL_Gaussian(GaussianModel):
 
         # initialize target networks
         self.actor = actor.to(self.device)
+
+        if actor_critic_path is not None:
+            checkpoint = torch.load(
+                actor_critic_path, map_location=self.device, weights_only=True
+            )
+            self.load_state_dict(
+                checkpoint["model"],
+                strict=True,
+            )
+            log.info("Loaded actor, critic, and target from %s", actor_critic_path)
 
     def loss_critic(
         self, obs, next_obs, actions, random_actions, rewards, returns, dones, gamma
@@ -114,6 +125,7 @@ class CalQL_Gaussian(GaussianModel):
         actor_loss = -torch.mean(q - alpha * log_probs)
         return actor_loss
 
+    # todo: remove
     def loss_temperature(self, obs, alpha, target_entropy):
         _, logprob = self.forward(
             obs,
