@@ -35,7 +35,7 @@ class CalQL_Gaussian(GaussianModel):
         self.critic = critic.to(self.device)
         self.target_critic = deepcopy(critic).to(self.device)
 
-        # initialize target networks
+        # initialize actor network (TODO: remove in a later commit)
         self.actor = actor.to(self.device)
 
         if actor_critic_path is not None:
@@ -60,8 +60,6 @@ class CalQL_Gaussian(GaussianModel):
         gamma,
         alpha,
     ):
-        # for some reason, alpha is not used in the critic loss
-
         # Get initial TD loss
         q_data1, q_data2 = self.critic(obs, actions)
         with torch.no_grad():
