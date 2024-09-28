@@ -4,13 +4,14 @@ Pre-training data loader. Modified from https://github.com/jannerm/diffuser/blob
 No normalization is applied here --- we always normalize the data when pre-processing it with a different script, and the normalization info is also used in RL fine-tuning.
 
 """
-
+from itertools import accumulate
 from collections import namedtuple
 import numpy as np
 import torch
 import logging
 import pickle
 import random
+from tqdm import tqdm
 
 log = logging.getLogger(__name__)
 
@@ -151,6 +152,7 @@ class StitchedSequenceQLearningDataset(StitchedSequenceDataset):
         self,
         dataset_path,
         max_n_episodes=10000,
+        discount_factor=1.0,
         device="cuda:0",
         **kwargs,
     ):
@@ -164,12 +166,17 @@ class StitchedSequenceQLearningDataset(StitchedSequenceDataset):
         traj_lengths = dataset["traj_lengths"][:max_n_episodes]
         total_num_steps = np.sum(traj_lengths)
 
+        # discount factor
+        self.discount_factor = discount_factor
+
         # rewards and dones(terminals)
         self.rewards = (
             torch.from_numpy(dataset["rewards"][:total_num_steps]).float().to(device)
         )
         log.info(f"Rewards shape/type: {self.rewards.shape, self.rewards.dtype}")
-        self.dones = torch.from_numpy(dataset["terminals"][:total_num_steps]).to(device)
+        self.dones = (
+            torch.from_numpy(dataset["terminals"][:total_num_steps]).to(device).float()
+        )
         log.info(f"Dones shape/type: {self.dones.shape, self.dones.dtype}")
 
         super().__init__(
@@ -179,6 +186,33 @@ class StitchedSequenceQLearningDataset(StitchedSequenceDataset):
             **kwargs,
         )
         log.info(f"Total number of transitions using: {len(self)}")
+
+        # compute discounted reward-to-go for each trajectory
+        self.reward_to_go = torch.zeros_like(self.rewards)
+        cumulative_traj_length = np.cumsum(traj_lengths)
+        prev_traj_length = 0
+        for i, traj_length in tqdm(
+            enumerate(cumulative_traj_length), desc="Computing reward-to-go"
+        ):
+            traj_rewards = self.rewards[prev_traj_length:traj_length]
+
+            # compute discounted returns using accumulate and reverse
+            returns = torch.tensor(
+                list(
+                    reversed(
+                        list(
+                            accumulate(
+                                reversed(traj_rewards),
+                                lambda x, y: y + self.discount_factor * x,
+                            )
+                        )
+                    )
+                )
+            )
+
+            self.reward_to_go[prev_traj_length:traj_length] = returns
+            prev_traj_length = traj_length
+        log.info(f"Computed reward-to-go for each trajectory.")
 
     def make_indices(self, traj_lengths, horizon_steps):
         """
@@ -198,16 +232,6 @@ class StitchedSequenceQLearningDataset(StitchedSequenceDataset):
             cur_traj_index += traj_length
         log.info(f"Number of transitions skipped due to truncation: {num_skip}")
         return indices
-
-        # compute reward to go for each trajectory
-        self.reward_to_go = torch.zeros_like(self.rewards)
-        prev_traj_length = 0
-        for i, traj_length in enumerate(cumulative_traj_length):
-            returns = torch.cumsum(self.rewards[prev_traj_length:traj_length], dim=0)
-            self.reward_to_go[prev_traj_length : traj_length - 1] = torch.flip(
-                returns, [0]
-            )[1:]
-            prev_traj_length = traj_length
 
     def __getitem__(self, idx):
         start, num_before_start = self.indices[idx]

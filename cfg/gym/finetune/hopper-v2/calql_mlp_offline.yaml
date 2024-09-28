@@ -107,3 +107,4 @@ offline_dataset:
   horizon_steps: ${horizon_steps}
   cond_steps: ${cond_steps}
   device: ${device}
+  discount_factor: ${train.gamma}

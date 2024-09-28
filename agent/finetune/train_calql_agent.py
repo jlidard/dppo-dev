@@ -12,6 +12,7 @@ import logging
 import wandb
 import hydra
 from collections import deque
+from itertools import accumulate
 
 log = logging.getLogger(__name__)
 from util.timer import Timer
@@ -212,10 +213,21 @@ class TrainCalQLAgent(TrainAgent):
             cumulative_traj_length = np.cumsum(traj_lengths)
             prev_traj_length = 0
             for i, traj_length in enumerate(cumulative_traj_length):
-                returns = np.cumsum(reward_trajs[prev_traj_length:traj_length])
-                reward_to_go[prev_traj_length : traj_length - 1, 0] = np.flip(returns)[
-                    1:
-                ]
+                traj_rewards = reward_trajs[prev_traj_length:traj_length, 0]
+
+                # Compute discounted returns using accumulate and reverse
+                returns = list(
+                    reversed(
+                        list(
+                            accumulate(
+                                reversed(traj_rewards), lambda x, y: y + self.gamma * x
+                            )
+                        )
+                    )
+                )
+
+                # Assign the computed returns back to the reward_to_go array
+                reward_to_go[prev_traj_length:traj_length, 0] = returns
                 prev_traj_length = traj_length
 
             # add reward-to-go to buffer
@@ -326,9 +338,6 @@ class TrainCalQLAgent(TrainAgent):
                             [reward_to_go_b, reward_to_go_b_on], dim=0
                         )
 
-                    # Compute the discounted value function approximation
-                    returns_b = rewards_b + self.gamma * (1 - dones_b) * reward_to_go_b
-
                     # Get a random action for Cal-QL
                     # TODO: we employ efficient torch sampling here; check to consistency with action space
                     random_actions = torch.rand(
@@ -344,7 +353,7 @@ class TrainCalQLAgent(TrainAgent):
                         actions_b,
                         random_actions,
                         rewards_b,
-                        returns_b,
+                        reward_to_go_b,
                         dones_b,
                         self.gamma,
                     )
