@@ -22,6 +22,7 @@ class CalQL_Gaussian(GaussianModel):
         cql_clip_diff_min=-np.inf,
         cql_clip_diff_max=np.inf,
         cql_min_q_weight=5.0,
+        cql_n_actions=10,
         actor_critic_path=None,
         **kwargs,
     ):
@@ -48,21 +49,42 @@ class CalQL_Gaussian(GaussianModel):
             log.info("Loaded actor, critic, and target from %s", actor_critic_path)
 
     def loss_critic(
-        self, obs, next_obs, actions, random_actions, rewards, returns, dones, gamma
+        self,
+        obs,
+        next_obs,
+        actions,
+        random_actions,
+        rewards,
+        returns,
+        dones,
+        gamma,
+        alpha,
     ):
         # for some reason, alpha is not used in the critic loss
 
         # Get initial TD loss
         q_data1, q_data2 = self.critic(obs, actions)
         with torch.no_grad():
-            next_actions, next_log_probs = self.forward(
-                next_obs, deterministic=False, get_logprob=True
-            )
-            next_q1, next_q2 = self.target_critic(next_obs, next_actions)
-            target_q1 = rewards + gamma * (1 - dones) * next_q1
-            target_q2 = rewards + gamma * (1 - dones) * next_q2
-        td_loss_1 = nn.functional.mse_loss(q_data1, target_q1)
-        td_loss_2 = nn.functional.mse_loss(q_data2, target_q2)
+            #  Sample next actions and calculate next Q values
+            next_q_list = []
+            for sample in range(self.cql_n_actions):
+                next_actions, next_log_probs = self.forward(
+                    next_obs, deterministic=False, get_logprob=True
+                )
+                next_q1, next_q2 = self.target_critic(next_obs, next_actions)
+                next_q = torch.min(next_q1, next_q2)
+                next_q_list.append(next_q)
+
+            # Aggregate samples and compute max over actions to get target Q
+            next_q = torch.stack(next_q_list, dim=0)  # (num_samples, batch_size)
+            next_q = torch.max(next_q, dim=0)[0]  # (batch_size,)
+            target_q = rewards + gamma * (1 - dones) * next_q
+
+            # Subtract the entropy bonus
+            target_q = target_q - alpha * next_log_probs
+
+        td_loss_1 = nn.functional.mse_loss(q_data1, target_q)
+        td_loss_2 = nn.functional.mse_loss(q_data2, target_q)
 
         # Get actions and logprobs
         log_rand_pi = 0.5 ** random_actions.shape[-1]
@@ -125,7 +147,6 @@ class CalQL_Gaussian(GaussianModel):
         actor_loss = -torch.mean(q - alpha * log_probs)
         return actor_loss
 
-    # todo: remove
     def loss_temperature(self, obs, alpha, target_entropy):
         _, logprob = self.forward(
             obs,
@@ -142,19 +163,3 @@ class CalQL_Gaussian(GaussianModel):
             self.target_critic.parameters(), self.critic.parameters()
         ):
             target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
-
-    # ---------- Sampling ----------#
-
-    def forward(
-        self,
-        cond,
-        deterministic=False,
-        reparameterize=False,
-        get_logprob=False,
-    ):
-        return super().forward(
-            cond=cond,
-            deterministic=deterministic,
-            reparameterize=reparameterize,
-            get_logprob=get_logprob,
-        )

@@ -339,7 +339,7 @@ class TrainCalQLAgent(TrainAgent):
                         )
 
                     # Get a random action for Cal-QL
-                    # TODO: we employ efficient torch sampling here; check to consistency with action space
+                    # TODO: we employ efficient torch sampling here; check consistency with action space
                     random_actions = torch.rand(
                         (self.n_random_actions, self.batch_size, 1, self.action_dim)
                     ).to(self.device)
@@ -356,6 +356,7 @@ class TrainCalQLAgent(TrainAgent):
                         reward_to_go_b,
                         dones_b,
                         self.gamma,
+                        alpha,
                     )
                     self.critic_optimizer.zero_grad()
                     loss_critic.backward()
