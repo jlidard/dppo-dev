@@ -30,13 +30,11 @@ class CalQL_Gaussian(GaussianModel):
         self.cql_clip_diff_min = cql_clip_diff_min
         self.cql_clip_diff_max = cql_clip_diff_max
         self.cql_min_q_weight = cql_min_q_weight
+        self.cql_n_actions = cql_n_actions
 
         # initialize critic networks
         self.critic = critic.to(self.device)
         self.target_critic = deepcopy(critic).to(self.device)
-
-        # initialize actor network (TODO: remove in a later commit)
-        self.actor = actor.to(self.device)
 
         if actor_critic_path is not None:
             checkpoint = torch.load(
@@ -65,17 +63,36 @@ class CalQL_Gaussian(GaussianModel):
         with torch.no_grad():
             #  Sample next actions and calculate next Q values
             next_q_list = []
-            for sample in range(self.cql_n_actions):
-                next_actions, next_log_probs = self.forward(
-                    next_obs, deterministic=False, get_logprob=True
-                )
-                next_q1, next_q2 = self.target_critic(next_obs, next_actions)
-                next_q = torch.min(next_q1, next_q2)
-                next_q_list.append(next_q)
 
-            # Aggregate samples and compute max over actions to get target Q
-            next_q = torch.stack(next_q_list, dim=0)  # (num_samples, batch_size)
-            next_q = torch.max(next_q, dim=0)[0]  # (batch_size,)
+            # expand the next_obs to match the number of samples
+            next_obs["state"] = next_obs["state"][None].repeat(
+                self.cql_n_actions, 1, 1, 1
+            )
+
+            # fold the samples into the batch dimension
+            next_obs["state"] = next_obs["state"].view(-1, *next_obs["state"].shape[2:])
+
+            # Get the next actions and logprobs
+            next_actions, next_log_probs = self.forward(
+                next_obs, deterministic=False, get_logprob=True
+            )
+            next_q1, next_q2 = self.target_critic(next_obs, next_actions)
+            next_q = torch.min(next_q1, next_q2)
+
+            # Reshape the next_q to match the number of samples
+            next_q = next_q.view(self.cql_n_actions, -1)  # (num_samples, batch_size)
+            next_log_probs = next_log_probs.view(
+                self.cql_n_actions, -1
+            )  # (num_samples, batch_size)
+
+            # Get the max indices over the samples, and index into the next_q and next_log_probs
+            max_idx = torch.argmax(next_q, dim=0)
+            next_q = next_q[max_idx, torch.arange(next_q.shape[1])]
+            next_log_probs = next_log_probs[
+                max_idx, torch.arange(next_log_probs.shape[1])
+            ]
+
+            # Get the target Q values
             target_q = rewards + gamma * (1 - dones) * next_q
 
             # Subtract the entropy bonus
@@ -94,14 +111,24 @@ class CalQL_Gaussian(GaussianModel):
         # to avoid complicated dictionary reshaping
         q_rand_1_list = []
         q_rand_2_list = []
-        for a in range(random_actions.shape[0]):
-            q_rand_1, q_rand_2 = self.critic(obs, random_actions[a])
-            q_rand_1 = q_rand_1 - log_rand_pi
-            q_rand_2 = q_rand_2 - log_rand_pi
-            q_rand_1_list.append(q_rand_1)
-            q_rand_2_list.append(q_rand_2)
-        q_rand_1 = torch.stack(q_rand_1_list, dim=0)  # (num_samples, batch_size)
-        q_rand_2 = torch.stack(q_rand_2_list, dim=0)  # (num_samples, batch_size)
+
+        # expand the obs to match the number of samples
+        n_random_actions = random_actions.shape[0]
+        obs_sample_state = obs["state"][None].repeat(n_random_actions, 1, 1, 1)
+
+        # fold the samples into the batch dimension
+        obs_sample_state = obs_sample_state.view(-1, *obs_sample_state.shape[2:])
+        obs_sample_state = {"state": obs_sample_state}
+        random_actions = random_actions.view(-1, *random_actions.shape[2:])
+
+        # Get the random action Q-values
+        q_rand_1, q_rand_2 = self.critic(obs_sample_state, random_actions)
+        q_rand_1 = q_rand_1 - log_rand_pi
+        q_rand_2 = q_rand_2 - log_rand_pi
+
+        # Reshape the random action Q values to match the number of samples
+        q_rand_1 = q_rand_1.view(n_random_actions, -1)  # (num_samples, batch_size)
+        q_rand_2 = q_rand_2.view(n_random_actions, -1)  # (num_samples, batch_size)
 
         # Policy action Q values
         q_pi_1, q_pi_2 = self.critic(obs, pi_actions)

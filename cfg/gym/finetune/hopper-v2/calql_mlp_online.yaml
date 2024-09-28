@@ -68,7 +68,7 @@ train:
   n_random_actions: 4
   target_ema_rate: 0.005       
   scale_reward_factor: 1.0
-  critic_num_update: 1
+  num_update: 1
   buffer_size: 1000000
   n_eval_episode: 10
   n_explore_steps: 0

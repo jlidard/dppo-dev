@@ -81,7 +81,7 @@ class TrainCalQLAgent(TrainAgent):
         self.scale_reward_factor = cfg.train.scale_reward_factor
 
         # Number of critic updates
-        self.critic_num_update = cfg.train.critic_num_update
+        self.num_update = cfg.train.num_update
 
         # Buffer size
         self.buffer_size = cfg.train.buffer_size
@@ -282,7 +282,7 @@ class TrainCalQLAgent(TrainAgent):
 
                 # Update critic more frequently
                 dataloader_iterator = iter(self.dataloader_offline)
-                for _ in range(self.critic_num_update):
+                for _ in range(self.num_update):
                     # Sample from OFFLINE buffer
                     try:
                         batch_offline = next(dataloader_iterator)
@@ -356,7 +356,7 @@ class TrainCalQLAgent(TrainAgent):
                         reward_to_go_b,
                         dones_b,
                         self.gamma,
-                        alpha,
+                        entropy_temperature.detach(),
                     )
                     self.critic_optimizer.zero_grad()
                     loss_critic.backward()
