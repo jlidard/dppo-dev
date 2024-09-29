@@ -11,9 +11,9 @@ normalization_path: ${oc.env:DPPO_DATA_DIR}/gym/${env_name}/normalization.npz
 offline_dataset_path: ${oc.env:DPPO_DATA_DIR}/gym/${env_name}/train.npz
 
 device: cuda:0
-env_name: hopper-medium-v2
-obs_dim: 11
-action_dim: 3
+env_name: halfcheetah-medium-v2
+obs_dim: 17
+action_dim: 6
 cond_steps: 1
 horizon_steps: 1
 act_steps: 1
