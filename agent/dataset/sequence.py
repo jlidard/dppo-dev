@@ -4,6 +4,7 @@ Pre-training data loader. Modified from https://github.com/jannerm/diffuser/blob
 No normalization is applied here --- we always normalize the data when pre-processing it with a different script, and the normalization info is also used in RL fine-tuning.
 
 """
+
 from itertools import accumulate
 from collections import namedtuple
 import numpy as np
@@ -16,7 +17,10 @@ from tqdm import tqdm
 log = logging.getLogger(__name__)
 
 Batch = namedtuple("Batch", "actions conditions")
-Transition = namedtuple("Transition", "actions conditions rewards dones reward_to_gos")
+Transition = namedtuple("Transition", "actions conditions rewards dones")
+TransitionWithReturn = namedtuple(
+    "Transition", "actions conditions rewards dones reward_to_gos"
+)
 
 
 class StitchedSequenceDataset(torch.utils.data.Dataset):
@@ -154,6 +158,7 @@ class StitchedSequenceQLearningDataset(StitchedSequenceDataset):
         max_n_episodes=10000,
         discount_factor=1.0,
         device="cuda:0",
+        get_mc_return=False,
         **kwargs,
     ):
         if dataset_path.endswith(".npz"):
@@ -188,26 +193,30 @@ class StitchedSequenceQLearningDataset(StitchedSequenceDataset):
         log.info(f"Total number of transitions using: {len(self)}")
 
         # compute discounted reward-to-go for each trajectory
-        self.reward_to_go = torch.zeros_like(self.rewards)
-        cumulative_traj_length = np.cumsum(traj_lengths)
-        prev_traj_length = 0
-        for i, traj_length in tqdm(
-            enumerate(cumulative_traj_length), desc="Computing reward-to-go"
-        ):
-            traj_rewards = self.rewards[prev_traj_length:traj_length]
-            returns = [
-                self.discount_factor**t * r
-                for t, r in zip(
-                    list(range(len(traj_rewards))),
-                    traj_rewards,
+        self.get_mc_return = get_mc_return
+        if get_mc_return:
+            self.reward_to_go = torch.zeros_like(self.rewards)
+            cumulative_traj_length = np.cumsum(traj_lengths)
+            prev_traj_length = 0
+            for i, traj_length in tqdm(
+                enumerate(cumulative_traj_length), desc="Computing reward-to-go"
+            ):
+                traj_rewards = self.rewards[prev_traj_length:traj_length]
+                returns = [
+                    self.discount_factor**t * r
+                    for t, r in zip(
+                        list(range(len(traj_rewards))),
+                        traj_rewards,
+                    )
+                ]
+                returns = torch.stack(returns)
+                returns = torch.flip(
+                    torch.cumsum(torch.flip(returns, (0,)), dim=0), (0,)
                 )
-            ]
-            returns = torch.stack(returns)
-            returns = torch.flip(torch.cumsum(torch.flip(returns, (0,)), dim=0), (0,))
 
-            self.reward_to_go[prev_traj_length:traj_length] = returns
-            prev_traj_length = traj_length
-        log.info(f"Computed reward-to-go for each trajectory.")
+                self.reward_to_go[prev_traj_length:traj_length] = returns
+                prev_traj_length = traj_length
+            log.info(f"Computed reward-to-go for each trajectory.")
 
     def make_indices(self, traj_lengths, horizon_steps):
         """
@@ -235,7 +244,6 @@ class StitchedSequenceQLearningDataset(StitchedSequenceDataset):
         actions = self.actions[start:end]
         rewards = self.rewards[start : (start + 1)]
         dones = self.dones[start : (start + 1)]
-        reward_to_gos = self.reward_to_go[start : (start + 1)]
 
         # Account for action horizon
         if idx < len(self.indices) - self.horizon_steps:
@@ -271,5 +279,21 @@ class StitchedSequenceQLearningDataset(StitchedSequenceDataset):
                 ]
             )
             conditions["rgb"] = images
-        batch = Transition(actions, conditions, rewards, dones, reward_to_gos)
+        if self.get_mc_return:
+            reward_to_gos = self.reward_to_go[start : (start + 1)]
+            batch = TransitionWithReturn(
+                actions,
+                conditions,
+                rewards,
+                dones,
+                reward_to_gos,
+            )
+        else:
+            batch = Transition(
+                actions,
+                conditions,
+                rewards,
+                dones,
+                reward_to_gos,
+            )
         return batch

@@ -110,3 +110,4 @@ offline_dataset:
   cond_steps: ${cond_steps}
   device: ${device}
   discount_factor: ${train.gamma}
+  get_mc_return: True
