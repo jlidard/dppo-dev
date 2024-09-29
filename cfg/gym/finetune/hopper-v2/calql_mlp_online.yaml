@@ -81,7 +81,7 @@ model:
   randn_clip_value: 3
   cql_min_q_weight: 5.0
   tanh_output: True
-  # actor_critic_path: ${base_policy_path}
+  # network_path: ${base_policy_path}
   actor:
     _target_: model.common.mlp_gaussian.Gaussian_MLP
     mlp_dims: [256, 256]

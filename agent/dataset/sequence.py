@@ -213,7 +213,6 @@ class StitchedSequenceQLearningDataset(StitchedSequenceDataset):
                 returns = torch.flip(
                     torch.cumsum(torch.flip(returns, (0,)), dim=0), (0,)
                 )
-
                 self.reward_to_go[prev_traj_length:traj_length] = returns
                 prev_traj_length = traj_length
             log.info(f"Computed reward-to-go for each trajectory.")
@@ -294,6 +293,5 @@ class StitchedSequenceQLearningDataset(StitchedSequenceDataset):
                 conditions,
                 rewards,
                 dones,
-                reward_to_gos,
             )
         return batch
