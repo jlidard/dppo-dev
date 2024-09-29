@@ -217,7 +217,6 @@ class TrainCalQLAgent(TrainAgent):
             prev_traj_length = 0
             for i, traj_length in enumerate(cumulative_traj_length):
                 traj_rewards = reward_trajs[prev_traj_length:traj_length, 0]
-
                 returns = [
                     self.gamma**t * r
                     for t, r in zip(
