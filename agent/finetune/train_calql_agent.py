@@ -110,7 +110,7 @@ class TrainCalQLAgent(TrainAgent):
         action_buffer = deque(maxlen=self.buffer_size)
         reward_buffer = deque(maxlen=self.buffer_size)
         reward_to_go_buffer = deque(maxlen=self.buffer_size)
-        done_buffer = deque(maxlen=self.buffer_size)
+        terminated_buffer = deque(maxlen=self.buffer_size)
 
         # Start training loop
         timer = Timer()
@@ -185,6 +185,7 @@ class TrainCalQLAgent(TrainAgent):
                 )
                 reward_trajs = np.vstack((reward_trajs, reward_venv[None]))
                 done_trajs = np.vstack((done_trajs, done_venv[None]))
+                terminated_venv = done_venv.copy()
 
                 # add to buffer in train mode
                 if not eval_mode:
@@ -211,18 +212,21 @@ class TrainCalQLAgent(TrainAgent):
             # compute reward-to-go (assume self.n_envs == 1)
             reward_to_go = np.zeros_like(reward_trajs)
             traj_lengths = np.where(done_trajs == 1)[0]
-            traj_lengths = np.diff(
-                np.concatenate(([-1], traj_lengths, [len(done_trajs) - 1]))
-            )
+            traj_lengths = np.diff(np.concatenate(([-1], traj_lengths)))
             cumulative_traj_length = np.cumsum(traj_lengths)
             prev_traj_length = 0
             for i, traj_length in enumerate(cumulative_traj_length):
                 traj_rewards = reward_trajs[prev_traj_length:traj_length, 0]
 
-                # Compute discounted returns using accumulate and reverse
-                returns = list(
-                    accumulate(reversed(traj_rewards), lambda x, y: y + self.gamma * x)
-                )[::-1]
+                returns = [
+                    self.gamma**t * r
+                    for t, r in zip(
+                        list(range(len(traj_rewards))),
+                        traj_rewards,
+                    )
+                ]
+                returns = np.stack(returns)
+                returns = np.flip(np.cumsum(np.flip(returns, 0), 0), 0)
 
                 # Assign the computed returns back to the reward_to_go array
                 reward_to_go[prev_traj_length:traj_length, 0] = returns
@@ -275,7 +279,7 @@ class TrainCalQLAgent(TrainAgent):
                 next_obs_array = np.array(next_obs_buffer)
                 actions_array = np.array(action_buffer)
                 rewards_array = np.array(reward_buffer)
-                dones_array = np.array(done_buffer)
+                terminated_array = np.array(terminated_buffer)
                 reward_to_go_array = np.array(reward_to_go_buffer)
 
                 # Update critic more frequently
@@ -293,7 +297,7 @@ class TrainCalQLAgent(TrainAgent):
                     rewards_b = (
                         batch_offline.rewards.flatten() * self.scale_reward_factor
                     )
-                    dones_b = batch_offline.dones.flatten()
+                    terminated_b = batch_offline.dones.flatten()
                     reward_to_go_b = batch_offline.reward_to_gos.flatten()
 
                     # Sample from ONLINE buffer
@@ -317,8 +321,10 @@ class TrainCalQLAgent(TrainAgent):
                             .float()
                             .to(self.device)
                         )
-                        dones_b_on = (
-                            torch.from_numpy(dones_array[inds]).float().to(self.device)
+                        terminated_b_on = (
+                            torch.from_numpy(terminated_array[inds])
+                            .float()
+                            .to(self.device)
                         )
                         reward_to_go_b_on = (
                             torch.from_numpy(reward_to_go_array[inds])
@@ -331,7 +337,7 @@ class TrainCalQLAgent(TrainAgent):
                         next_obs_b = torch.cat([next_obs_b, next_obs_b_on], dim=0)
                         actions_b = torch.cat([actions_b, actions_b_on], dim=0)
                         rewards_b = torch.cat([rewards_b, rewards_b_on], dim=0)
-                        dones_b = torch.cat([dones_b, dones_b_on], dim=0)
+                        terminated_b = torch.cat([terminated_b, terminated_b_on], dim=0)
                         reward_to_go_b = torch.cat(
                             [reward_to_go_b, reward_to_go_b_on], dim=0
                         )
@@ -352,7 +358,7 @@ class TrainCalQLAgent(TrainAgent):
                         random_actions,
                         rewards_b,
                         reward_to_go_b,
-                        dones_b,
+                        terminated_b,
                         self.gamma,
                         entropy_temperature.detach(),
                     )

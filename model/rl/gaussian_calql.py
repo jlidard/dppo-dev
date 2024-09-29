@@ -51,9 +51,6 @@ class CalQL_Gaussian(GaussianModel):
         # Get initial TD loss
         q_data1, q_data2 = self.critic(obs, actions)
         with torch.no_grad():
-            #  Sample next actions and calculate next Q values
-            next_q_list = []
-
             # expand the next_obs to match the number of samples
             next_obs["state"] = next_obs["state"][None].repeat(
                 self.cql_n_actions, 1, 1, 1
