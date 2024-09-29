@@ -360,27 +360,27 @@ class TrainCalQLAgent(TrainAgent):
                     loss_critic.backward()
                     self.critic_optimizer.step()
 
-                    # Update target critic every critic update
+                    # Update target critic
                     self.model.update_target_critic(self.target_ema_rate)
 
-                # Update actor once with the final batch
-                loss_actor = self.model.loss_actor(
-                    {"state": obs_b},
-                    entropy_temperature.detach(),
-                )
-                self.actor_optimizer.zero_grad()
-                loss_actor.backward()
-                self.actor_optimizer.step()
+                    # Update actor
+                    loss_actor = self.model.loss_actor(
+                        {"state": obs_b},
+                        entropy_temperature.detach(),
+                    )
+                    self.actor_optimizer.zero_grad()
+                    loss_actor.backward()
+                    self.actor_optimizer.step()
 
-                # Update temperature parameter
-                self.log_alpha_optimizer.zero_grad()
-                loss_alpha = self.model.loss_temperature(
-                    {"state": obs_b},
-                    entropy_temperature,
-                    self.target_entropy,
-                )
-                loss_alpha.backward()
-                self.log_alpha_optimizer.step()
+                    # Update temperature parameter
+                    self.log_alpha_optimizer.zero_grad()
+                    loss_alpha = self.model.loss_temperature(
+                        {"state": obs_b},
+                        entropy_temperature,
+                        self.target_entropy,
+                    )
+                    loss_alpha.backward()
+                    self.log_alpha_optimizer.step()
 
             # Update lr
             self.actor_lr_scheduler.step()
