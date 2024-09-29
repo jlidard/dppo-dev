@@ -87,8 +87,9 @@ model:
     cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
     horizon_steps: ${horizon_steps}
     transition_dim: ${action_dim}
-    # fixed_std: 0.1
-    # dropout: 0.5
+    std_max: 7.3891
+    std_min: 0.0067
+    tanh_output: False
   critic:
     _target_: model.common.critic.CriticObsAct
     mlp_dims: [256, 256]
