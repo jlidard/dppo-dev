@@ -36,16 +36,6 @@ class CalQL_Gaussian(GaussianModel):
         self.critic = critic.to(self.device)
         self.target_critic = deepcopy(critic).to(self.device)
 
-        if actor_critic_path is not None:
-            checkpoint = torch.load(
-                actor_critic_path, map_location=self.device, weights_only=True
-            )
-            self.load_state_dict(
-                checkpoint["model"],
-                strict=True,
-            )
-            log.info("Loaded actor, critic, and target from %s", actor_critic_path)
-
     def loss_critic(
         self,
         obs,

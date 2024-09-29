@@ -199,15 +199,11 @@ class StitchedSequenceQLearningDataset(StitchedSequenceDataset):
             # compute discounted returns using accumulate and reverse
             returns = torch.tensor(
                 list(
-                    reversed(
-                        list(
-                            accumulate(
-                                reversed(traj_rewards),
-                                lambda x, y: y + self.discount_factor * x,
-                            )
-                        )
+                    accumulate(
+                        reversed(traj_rewards),
+                        lambda x, y: y + self.discount_factor * x,
                     )
-                )
+                )[::-1]
             )
 
             self.reward_to_go[prev_traj_length:traj_length] = returns

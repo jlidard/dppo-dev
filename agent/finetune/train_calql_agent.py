@@ -190,10 +190,14 @@ class TrainCalQLAgent(TrainAgent):
                 if not eval_mode:
                     for i in range(self.n_envs):
                         obs_buffer.append(prev_obs_venv["state"][i])
-                        next_obs_buffer.append(obs_venv["state"][i])
+                        if "final_obs" in info_venv[i]:  # truncated
+                            next_obs_buffer.append(info_venv[i]["final_obs"]["state"])
+                            terminated_venv[i] = False
+                        else:  # first obs in new episode
+                            next_obs_buffer.append(obs_venv["state"][i])
                         action_buffer.append(action_venv[i])
                         reward_buffer.append(reward_venv[i] * self.scale_reward_factor)
-                        done_buffer.append(done_venv[i])
+                        terminated_buffer.append(terminated_venv[i])
                 firsts_trajs = np.vstack(
                     (firsts_trajs, done_venv)
                 )  # offset by one step
@@ -217,14 +221,8 @@ class TrainCalQLAgent(TrainAgent):
 
                 # Compute discounted returns using accumulate and reverse
                 returns = list(
-                    reversed(
-                        list(
-                            accumulate(
-                                reversed(traj_rewards), lambda x, y: y + self.gamma * x
-                            )
-                        )
-                    )
-                )
+                    accumulate(reversed(traj_rewards), lambda x, y: y + self.gamma * x)
+                )[::-1]
 
                 # Assign the computed returns back to the reward_to_go array
                 reward_to_go[prev_traj_length:traj_length, 0] = returns
