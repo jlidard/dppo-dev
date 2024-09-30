@@ -78,8 +78,9 @@ class TrainCalQLAgent(TrainAgent):
         # Buffer size
         self.buffer_size = cfg.train.buffer_size
 
-        # Eval episodes
-        self.n_episode_per_epoch = cfg.train.n_episode_per_epoch
+        # Train episodes
+        if self.train_online:
+            self.n_episode_per_epoch = cfg.train.n_episode_per_epoch
 
         # Eval episodes
         self.n_eval_episode = cfg.train.n_eval_episode
