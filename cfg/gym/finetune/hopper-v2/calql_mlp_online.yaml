@@ -6,11 +6,12 @@ hydra:
 _target_: agent.finetune.train_calql_agent.TrainCalQLAgent
 
 name: ${env_name}_calql_mlp_ta${horizon_steps}
-logdir: ${oc.env:DPPO_LOG_DIR}/gym-finetune/${name}/${now:%Y-%m-%d}_${now:%H-%M-%S}
+logdir: ${oc.env:DPPO_LOG_DIR}/gym-finetune/${name}/${now:%Y-%m-%d}_${now:%H-%M-%S}_${seed}
 base_policy_path:
 normalization_path: ${oc.env:DPPO_DATA_DIR}/gym/${env_name}/normalization.npz
 offline_dataset_path: ${oc.env:DPPO_DATA_DIR}/gym/${env_name}/train.npz
 
+seed: 42
 device: cuda:0
 env_name: hopper-medium-v2
 obs_dim: 11
