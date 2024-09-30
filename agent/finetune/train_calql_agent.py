@@ -97,6 +97,7 @@ class TrainCalQLAgent(TrainAgent):
         self.log_alpha = torch.tensor(np.log(init_temperature)).to(self.device)
         self.log_alpha.requires_grad = True
         # set target entropy to -|A|/2
+        self.automatic_entropy_tuning = cfg.train.automatic_entropy_tuning
         self.target_entropy = cfg.train.target_entropy
         self.log_alpha_optimizer = torch.optim.Adam(
             [self.log_alpha],
@@ -217,16 +218,11 @@ class TrainCalQLAgent(TrainAgent):
             prev_traj_length = 0
             for i, traj_length in enumerate(cumulative_traj_length):
                 traj_rewards = reward_trajs[prev_traj_length:traj_length, 0]
-                returns = [
-                    self.gamma**t * r
-                    for t, r in zip(
-                        list(range(len(traj_rewards))),
-                        traj_rewards,
-                    )
-                ]
-                returns = np.stack(returns)
-                returns = np.flip(np.cumsum(np.flip(returns, 0), 0), 0)
-
+                returns = np.zeros_like(traj_rewards)
+                prev_return = 0
+                for t in range(len(traj_rewards)):
+                    returns[-t - 1] = traj_rewards[-t - 1] + self.gamma * prev_return
+                    prev_return = returns[-t - 1]
                 # Assign the computed returns back to the reward_to_go array
                 reward_to_go[prev_traj_length:traj_length, 0] = returns
                 prev_traj_length = traj_length
@@ -378,14 +374,15 @@ class TrainCalQLAgent(TrainAgent):
                     self.actor_optimizer.step()
 
                     # Update temperature parameter
-                    self.log_alpha_optimizer.zero_grad()
-                    loss_alpha = self.model.loss_temperature(
-                        {"state": obs_b},
-                        entropy_temperature,
-                        self.target_entropy,
-                    )
-                    loss_alpha.backward()
-                    self.log_alpha_optimizer.step()
+                    if self.automatic_entropy_tuning:
+                        self.log_alpha_optimizer.zero_grad()
+                        loss_alpha = self.model.loss_temperature(
+                            {"state": obs_b},
+                            entropy_temperature,
+                            self.target_entropy,
+                        )
+                        loss_alpha.backward()
+                        self.log_alpha_optimizer.step()
 
             # Update lr
             self.actor_lr_scheduler.step()
