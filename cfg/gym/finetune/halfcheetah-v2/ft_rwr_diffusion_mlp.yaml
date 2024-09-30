@@ -19,6 +19,7 @@ denoising_steps: 20
 cond_steps: 1
 horizon_steps: 4
 act_steps: 4
+seed: 42
 
 env:
   n_envs: 40
@@ -38,7 +39,7 @@ env:
 
 wandb:
   entity: ${oc.env:DPPO_WANDB_ENTITY}
-  project: gym-${env_name}-finetune
+  project: rwr-gym-${env_name}-finetune
   run: ${now:%H-%M-%S}_${name}
 
 train:

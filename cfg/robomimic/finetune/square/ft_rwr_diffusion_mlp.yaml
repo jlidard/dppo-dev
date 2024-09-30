@@ -43,7 +43,7 @@ env:
 
 wandb:
   entity: ${oc.env:DPPO_WANDB_ENTITY}
-  project: robomimic-${env_name}-finetune
+  project: rwr-robomimic-${env_name}-finetune
   run: ${now:%H-%M-%S}_${name}
 
 train:
