@@ -78,9 +78,13 @@ class TrainCalQLAgent(TrainAgent):
         # Buffer size
         self.buffer_size = cfg.train.buffer_size
 
-        # Train episodes
+        # Online only configs
         if self.train_online:
+            # number of episode to colect per epoch for training
             self.n_episode_per_epoch = cfg.train.n_episode_per_epoch
+            
+            # UTD ratio
+            self.online_utd_ratio = cfg.train.online_utd_ratio
 
         # Eval episodes
         self.n_eval_episode = cfg.train.n_eval_episode
@@ -154,6 +158,7 @@ class TrainCalQLAgent(TrainAgent):
                 and self.itr >= self.n_explore_steps
                 and not self.force_train
             )
+            # during eval, we collect a fixed number of episodes, so we set n_steps to a large value
             if eval_mode:
                 n_steps = int(1e5)
             elif not self.train_online:

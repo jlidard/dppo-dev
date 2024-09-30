@@ -72,6 +72,7 @@ train:
   scale_reward_factor: 1.0
   num_update: 1000
   buffer_size: 1000000
+  online_utd_ratio: 1
   n_eval_episode: 10
   n_explore_steps: 0
   target_entropy: ${eval:'- ${action_dim} * ${act_steps}'}
