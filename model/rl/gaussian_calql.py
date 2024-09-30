@@ -37,7 +37,7 @@ class CalQL_Gaussian(GaussianModel):
         self.critic = critic.to(self.device)
         self.target_critic = deepcopy(critic).to(self.device)
 
-        # Load pre-trained
+        # Load pre-trained checkpoint - note we are also loading the pre-trained critic here
         if network_path is not None:
             checkpoint = torch.load(
                 network_path,
