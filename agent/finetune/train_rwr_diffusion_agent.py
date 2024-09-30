@@ -167,6 +167,8 @@ class TrainRWRDiffusionAgent(TrainAgent):
                         )
                         prev_return = traj_returns[-t - 1]
 
+                # Note: concatenation is okay here since we are concatenating
+                # states and actions later on, in the same order
                 returns_trajs_split = np.concatenate(returns_trajs_split)
 
                 episode_reward = np.array(
