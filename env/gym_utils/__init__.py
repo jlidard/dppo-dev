@@ -174,7 +174,6 @@ def make_async(
         return env
 
     def dummy_env_fn():
-        """TODO(allenzren): does this dummy env allow camera obs for other envs besides robomimic?"""
         import gym
         import numpy as np
         from env.gym_utils.wrapper.multi_step import MultiStep
