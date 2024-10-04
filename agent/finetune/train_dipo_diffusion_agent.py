@@ -71,8 +71,8 @@ class TrainDIPODiffusionAgent(TrainAgent):
         # Buffer size
         self.buffer_size = cfg.train.buffer_size
 
-        # Perturbation scale
-        self.eta = cfg.train.eta
+        # Action gradient scaling
+        self.action_lr = cfg.train.action_lr
 
         # Updates
         self.replay_ratio = cfg.train.replay_ratio
@@ -215,7 +215,9 @@ class TrainDIPODiffusionAgent(TrainAgent):
 
             # Update models
             if not eval_mode:
-                num_batch = int(self.replay_ratio * self.n_steps * self.n_envs)
+                num_batch = int(
+                    self.n_steps * self.n_envs / self.batch_size * self.replay_ratio
+                )
 
                 # Critic learning
                 for _ in range(num_batch):
@@ -261,60 +263,61 @@ class TrainDIPODiffusionAgent(TrainAgent):
                     self.critic_optimizer.step()
 
                     # Actor learning
-                    inds = np.random.choice(len(obs_buffer), self.batch_size)
-                    obs_b = (
-                        torch.from_numpy(np.array([obs_buffer[i] for i in inds]))
-                        .float()
-                        .to(self.device)
-                    )
-                    actions_b = (
-                        torch.from_numpy(np.array([action_buffer[i] for i in inds]))
-                        .float()
-                        .to(self.device)
-                    )
-
-                    # get Q-perturbed actions by optimizing
-                    actions_flat = actions_b.reshape(len(actions_b), -1)
-                    actions_optim = torch.optim.Adam(
-                        [actions_flat], lr=self.eta, eps=1e-5
-                    )
-                    for _ in range(self.action_gradient_steps):
-                        actions_flat.requires_grad_(True)
-                        q_values_1, q_values_2 = self.model.critic(
-                            {"state": obs_b}, actions_flat
-                        )
-                        q_values = torch.min(q_values_1, q_values_2)
-                        action_opt_loss = -q_values.sum()
-
-                        actions_optim.zero_grad()
-                        action_opt_loss.backward(torch.ones_like(action_opt_loss))
-                        torch.nn.utils.clip_grad_norm_(
-                            [actions_flat],
-                            max_norm=self.action_grad_norm,
-                            norm_type=2,
-                        )
-
-                        # get the perturbed action
-                        actions_optim.step()
-
-                        actions_flat.requires_grad_(False)
-                        actions_flat.clamp_(-1.0, 1.0)
-                    guided_action = actions_flat.reshape(
-                        len(actions_flat), self.horizon_steps, self.action_dim
-                    )
-                    guided_action_np = guided_action.detach().cpu().numpy()
-
-                    # Add back to buffer
-                    for i, i_buf in enumerate(inds):
-                        action_buffer[i_buf] = guided_action_np[i]
-
-                    # Update policy with collected trajectories
-                    loss_actor = self.model.loss(
-                        guided_action.detach(), {"state": obs_b}
-                    )
-                    self.actor_optimizer.zero_grad()
-                    loss_actor.backward()
+                    loss_actor = 0.0
                     if self.itr >= self.n_critic_warmup_itr:
+                        inds = np.random.choice(len(obs_buffer), self.batch_size)
+                        obs_b = (
+                            torch.from_numpy(np.array([obs_buffer[i] for i in inds]))
+                            .float()
+                            .to(self.device)
+                        )
+                        actions_b = (
+                            torch.from_numpy(np.array([action_buffer[i] for i in inds]))
+                            .float()
+                            .to(self.device)
+                        )
+
+                        # get Q-perturbed actions by optimizing
+                        actions_flat = actions_b.reshape(len(actions_b), -1)
+                        actions_optim = torch.optim.Adam(
+                            [actions_flat], lr=self.action_lr, eps=1e-5
+                        )
+                        for _ in range(self.action_gradient_steps):
+                            actions_flat.requires_grad_(True)
+                            q_values_1, q_values_2 = self.model.critic(
+                                {"state": obs_b}, actions_flat
+                            )
+                            q_values = torch.min(q_values_1, q_values_2)
+                            action_opt_loss = -q_values.sum()
+
+                            actions_optim.zero_grad()
+                            action_opt_loss.backward(torch.ones_like(action_opt_loss))
+                            torch.nn.utils.clip_grad_norm_(
+                                [actions_flat],
+                                max_norm=self.action_grad_norm,
+                                norm_type=2,
+                            )
+
+                            # get the perturbed action
+                            actions_optim.step()
+
+                            actions_flat.requires_grad_(False)
+                            actions_flat.clamp_(-1.0, 1.0)
+                        guided_action = actions_flat.reshape(
+                            len(actions_flat), self.horizon_steps, self.action_dim
+                        )
+                        guided_action_np = guided_action.detach().cpu().numpy()
+
+                        # Add back to buffer
+                        for i, i_buf in enumerate(inds):
+                            action_buffer[i_buf] = guided_action_np[i]
+
+                        # Update policy with collected trajectories
+                        loss_actor = self.model.loss(
+                            guided_action.detach(), {"state": obs_b}
+                        )
+                        self.actor_optimizer.zero_grad()
+                        loss_actor.backward()
                         if self.max_grad_norm is not None:
                             torch.nn.utils.clip_grad_norm_(
                                 self.model.actor.parameters(), self.max_grad_norm
@@ -366,17 +369,15 @@ class TrainDIPODiffusionAgent(TrainAgent):
                         f"{self.itr}: step {cnt_train_step:8d} | loss actor {loss_actor:8.4f} | loss - critic {loss_critic:8.4f} | reward {avg_episode_reward:8.4f} | t:{time:8.4f}"
                     )
                     if self.use_wandb:
-                        wandb.log(
-                            {
-                                "total env step": cnt_train_step,
-                                "loss - actor": loss_actor,
-                                "loss - critic": loss_critic,
-                                "avg episode reward - train": avg_episode_reward,
-                                "num episode - train": num_episode_finished,
-                            },
-                            step=self.itr,
-                            commit=True,
-                        )
+                        wandb_log = {
+                            "total env step": cnt_train_step,
+                            "loss - critic": loss_critic,
+                            "avg episode reward - train": avg_episode_reward,
+                            "num episode - train": num_episode_finished,
+                        }
+                        if type(loss_actor) == torch.Tensor:
+                            wandb_log["loss - actor"] = loss_actor
+                        wandb.log(wandb_log, step=self.itr, commit=True)
                     run_results[-1]["train_episode_reward"] = avg_episode_reward
                 with open(self.result_path, "wb") as f:
                     pickle.dump(run_results, f)
