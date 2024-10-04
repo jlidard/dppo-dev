@@ -21,7 +21,7 @@ horizon_steps: 4
 act_steps: 4
 
 env:
-  n_envs: 40
+  n_envs: 1
   name: ${env_name}
   max_episode_steps: 1000
   reset_at_iteration: False
@@ -65,11 +65,12 @@ train:
     num: 0
   # DIPO specific
   scale_reward_factor: 0.01
-  eta: 0.0001
+  eta: 0.03
+  target_ema_rate: 0.005
   action_gradient_steps: 10
   buffer_size: 400000
   batch_size: 5000
-  replay_ratio: 64
+  replay_ratio: 1
 
 model:
   _target_: model.diffusion.diffusion_dipo.DIPODiffusion

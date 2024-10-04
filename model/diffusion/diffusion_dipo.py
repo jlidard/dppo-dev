@@ -5,6 +5,7 @@ Actor and Critic models for model-free online RL with DIffusion POlicy (DIPO).
 
 import torch
 import logging
+import copy
 
 log = logging.getLogger(__name__)
 
@@ -27,8 +28,14 @@ class DIPODiffusion(DiffusionModel):
         assert not self.use_ddim, "DQL does not support DDIM"
         self.critic = critic.to(self.device)
 
+        # target critic
+        self.critic_target = copy.deepcopy(self.critic)
+
         # reassign actor
         self.actor = self.network
+
+        # target actor
+        self.actor_target = copy.deepcopy(self.actor)
 
         # Minimum std used in denoising process when sampling action - helps exploration
         self.min_sampling_denoising_std = min_sampling_denoising_std
@@ -45,7 +52,7 @@ class DIPODiffusion(DiffusionModel):
             cond=next_obs,
             deterministic=False,
         )  # forward() has no gradient, which is desired here.
-        next_q1, next_q2 = self.critic(next_obs, next_actions)
+        next_q1, next_q2 = self.critic_target(next_obs, next_actions)
         next_q = torch.min(next_q1, next_q2)
 
         # terminal state mask
@@ -66,6 +73,22 @@ class DIPODiffusion(DiffusionModel):
 
         return loss_critic
 
+    def update_target_critic(self, tau):
+        for target_param, source_param in zip(
+            self.critic_target.parameters(), self.critic.parameters()
+        ):
+            target_param.data.copy_(
+                target_param.data * (1.0 - tau) + source_param.data * tau
+            )
+
+    def update_target_actor(self, tau):
+        for target_param, source_param in zip(
+            self.actor_target.parameters(), self.actor.parameters()
+        ):
+            target_param.data.copy_(
+                target_param.data * (1.0 - tau) + source_param.data * tau
+            )
+
     # ---------- Sampling ----------#``
 
     # override
@@ -75,6 +98,7 @@ class DIPODiffusion(DiffusionModel):
         cond,
         deterministic=False,
     ):
+        """Use target actor"""
         device = self.betas.device
         B = len(cond["state"])
 
@@ -87,6 +111,7 @@ class DIPODiffusion(DiffusionModel):
                 x=x,
                 t=t_b,
                 cond=cond,
+                network_override=self.actor_target,
             )
             std = torch.exp(0.5 * logvar)
 

@@ -65,6 +65,9 @@ class TrainDIPODiffusionAgent(TrainAgent):
             gamma=1.0,
         )
 
+        # target update rate
+        self.target_ema_rate = cfg.train.target_ema_rate
+
         # Buffer size
         self.buffer_size = cfg.train.buffer_size
 
@@ -79,6 +82,9 @@ class TrainDIPODiffusionAgent(TrainAgent):
 
         # Apply action gradient many steps
         self.action_gradient_steps = cfg.train.action_gradient_steps
+
+        # Max grad norm for action
+        self.action_grad_norm = self.action_dim * self.act_steps * 0.1
 
     def run(self):
 
@@ -205,7 +211,7 @@ class TrainDIPODiffusionAgent(TrainAgent):
 
             # Update models
             if not eval_mode:
-                num_batch = self.replay_ratio
+                num_batch = int(self.replay_ratio * self.n_steps * self.n_envs)
 
                 # Critic learning
                 for _ in range(num_batch):
@@ -250,9 +256,7 @@ class TrainDIPODiffusionAgent(TrainAgent):
                     loss_critic.backward()
                     self.critic_optimizer.step()
 
-                # Actor learning
-                for _ in range(num_batch):
-                    # Sample batch
+                    # Actor learning
                     inds = np.random.choice(len(obs_buffer), self.batch_size)
                     obs_b = (
                         torch.from_numpy(np.array([obs_buffer[i] for i in inds]))
@@ -265,11 +269,8 @@ class TrainDIPODiffusionAgent(TrainAgent):
                         .to(self.device)
                     )
 
-                    # Replace actions in buffer with guided actions
-                    guided_action_list = []
-
                     # get Q-perturbed actions by optimizing
-                    actions_flat = actions_b.reshape(actions_b.shape[0], -1)
+                    actions_flat = actions_b.reshape(len(actions_b), -1)
                     actions_optim = torch.optim.Adam(
                         [actions_flat], lr=self.eta, eps=1e-5
                     )
@@ -283,24 +284,25 @@ class TrainDIPODiffusionAgent(TrainAgent):
 
                         actions_optim.zero_grad()
                         action_opt_loss.backward(torch.ones_like(action_opt_loss))
+                        torch.nn.utils.clip_grad_norm_(
+                            [actions_flat],
+                            max_norm=self.action_grad_norm,
+                            norm_type=2,
+                        )
 
                         # get the perturbed action
                         actions_optim.step()
 
                         actions_flat.requires_grad_(False)
                         actions_flat.clamp_(-1.0, 1.0)
-                    guided_action = actions_flat.detach()
-                    guided_action = guided_action.reshape(
-                        guided_action.shape[0], -1, self.action_dim
+                    guided_action = actions_flat.reshape(
+                        len(actions_flat), self.horizon_steps, self.action_dim
                     )
-                    guided_action_list.append(guided_action)
-                    guided_action_stacked = torch.cat(guided_action_list, 0)
+                    guided_action_np = guided_action.detach().cpu().numpy()
 
-                    # Add to buffer (need separate indices since we're working with a limited subset)
+                    # Add back to buffer
                     for i, i_buf in enumerate(inds):
-                        action_buffer[i_buf] = (
-                            guided_action_stacked[i].detach().cpu().numpy()
-                        )
+                        action_buffer[i_buf] = guided_action_np[i]
 
                     # Update policy with collected trajectories
                     loss = self.model.loss(guided_action.detach(), {"state": obs_b})
@@ -312,6 +314,10 @@ class TrainDIPODiffusionAgent(TrainAgent):
                                 self.model.actor.parameters(), self.max_grad_norm
                             )
                         self.actor_optimizer.step()
+
+                    # Update target critic and actor
+                    self.model.update_target_critic(self.target_ema_rate)
+                    self.model.update_target_actor(self.target_ema_rate)
 
             # Update lr
             self.actor_lr_scheduler.step()
