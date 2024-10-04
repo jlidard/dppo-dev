@@ -79,7 +79,7 @@ model:
     _target_: model.common.mlp_gaussian.Gaussian_MLP
     mlp_dims: [512, 512, 512]
     activation_type: ReLU
-    residual_style: True
+    residual_style: False # with new logvar head
     cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
     horizon_steps: ${horizon_steps}
     transition_dim: ${transition_dim}
