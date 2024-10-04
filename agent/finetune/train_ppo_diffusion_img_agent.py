@@ -40,6 +40,7 @@ class TrainPPOImgDiffusionAgent(TrainPPODiffusionAgent):
         # Start training loop
         timer = Timer()
         run_results = []
+        cnt_train_step = 0
         last_itr_eval = False
         done_venv = np.zeros((1, self.n_envs))
         while self.itr < self.n_train_itr:
@@ -122,9 +123,12 @@ class TrainPPOImgDiffusionAgent(TrainPPODiffusionAgent):
                 reward_trajs[step] = reward_venv
                 terminated_trajs[step] = terminated_venv
                 firsts_trajs[step + 1] = done_venv
-                
+
                 # update for next step
                 prev_obs_venv = obs_venv
+
+                # count steps --- not acounting for done within action chunk
+                cnt_train_step += self.n_envs * self.act_steps if not eval_mode else 0
 
             # Summarize episode reward --- this needs to be handled differently depending on whether the environment is reset after each iteration. Only count episodes that finish within the iteration.
             episodes_start_end = []
@@ -402,10 +406,12 @@ class TrainPPOImgDiffusionAgent(TrainPPODiffusionAgent):
             run_results.append(
                 {
                     "itr": self.itr,
+                    "step": cnt_train_step,
                 }
             )
             if self.itr % self.log_freq == 0:
                 time = timer()
+                run_results[-1]["time"] = time
                 if eval_mode:
                     log.info(
                         f"eval: success rate {success_rate:8.4f} | avg episode reward {avg_episode_reward:8.4f} | avg best reward {avg_best_reward:8.4f}"
@@ -426,11 +432,12 @@ class TrainPPOImgDiffusionAgent(TrainPPODiffusionAgent):
                     run_results[-1]["eval_best_reward"] = avg_best_reward
                 else:
                     log.info(
-                        f"{self.itr}: loss {loss:8.4f} | pg loss {pg_loss:8.4f} | value loss {v_loss:8.4f} | bc loss {bc_loss:8.4f} | reward {avg_episode_reward:8.4f} | eta {eta:8.4f} | t:{time:8.4f}"
+                        f"{self.itr}: step {cnt_train_step:8d} | loss {loss:8.4f} | pg loss {pg_loss:8.4f} | value loss {v_loss:8.4f} | bc loss {bc_loss:8.4f} | reward {avg_episode_reward:8.4f} | eta {eta:8.4f} | t:{time:8.4f}"
                     )
                     if self.use_wandb:
                         wandb.log(
                             {
+                                "total env step": cnt_train_step,
                                 "loss": loss,
                                 "pg loss": pg_loss,
                                 "value loss": v_loss,
@@ -451,17 +458,7 @@ class TrainPPOImgDiffusionAgent(TrainPPODiffusionAgent):
                             step=self.itr,
                             commit=True,
                         )
-                    run_results[-1]["loss"] = loss
-                    run_results[-1]["pg_loss"] = pg_loss
-                    run_results[-1]["value_loss"] = v_loss
-                    run_results[-1]["bc_loss"] = bc_loss
-                    run_results[-1]["eta"] = eta
-                    run_results[-1]["approx_kl"] = approx_kl
-                    run_results[-1]["ratio"] = ratio
-                    run_results[-1]["clip_frac"] = np.mean(clipfracs)
-                    run_results[-1]["explained_variance"] = explained_var
                     run_results[-1]["train_episode_reward"] = avg_episode_reward
-                run_results[-1]["time"] = time
                 with open(self.result_path, "wb") as f:
                     pickle.dump(run_results, f)
             self.itr += 1

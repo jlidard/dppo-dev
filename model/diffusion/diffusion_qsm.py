@@ -29,6 +29,8 @@ class QSMDiffusion(RWRDiffusion):
     ):
         super().__init__(network=actor, **kwargs)
         self.critic_q = critic.to(self.device)
+
+        # target critic
         self.target_q = copy.deepcopy(critic)
 
         # assign actor
@@ -49,7 +51,6 @@ class QSMDiffusion(RWRDiffusion):
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
 
         # get current value for noisy actions as the code does --- the algorthm block in the paper is wrong, it says using a_t, the final denoised action
-        # x_noisy_flat = torch.flatten(x_noisy, start_dim=-2)
         x_noisy.requires_grad_(True)
         current_q1, current_q2 = self.critic_q(obs, x_noisy)
 
@@ -63,7 +64,7 @@ class QSMDiffusion(RWRDiffusion):
 
         # Loss with mask - align predicted noise with critic gradient of noisy actions
         # Note: the gradient of mu wrt. epsilon has a negative sign
-        loss = F.mse_loss(-x_recon, q_grad_coeff * gradient_q, reduction="none").mean()
+        loss = F.mse_loss(-x_recon, q_grad_coeff * gradient_q)
         return loss
 
     def loss_critic(self, obs, next_obs, actions, rewards, terminated, gamma):

@@ -51,7 +51,6 @@ class IDQLDiffusion(RWRDiffusion):
 
         # compute advantage
         adv = q - v
-
         return adv
 
     def loss_critic_v(self, obs, actions):
@@ -59,7 +58,6 @@ class IDQLDiffusion(RWRDiffusion):
 
         # get the value loss
         v_loss = expectile_loss(adv).mean()
-
         return v_loss
 
     def loss_critic_q(self, obs, next_obs, actions, rewards, terminated, gamma):
@@ -86,7 +84,6 @@ class IDQLDiffusion(RWRDiffusion):
         q_loss = torch.mean((current_q1 - discounted_q) ** 2) + torch.mean(
             (current_q2 - discounted_q) ** 2
         )
-
         return q_loss
 
     def update_target_critic(self, tau):
@@ -116,10 +113,9 @@ class IDQLDiffusion(RWRDiffusion):
 
         # Loss with mask
         if self.predict_epsilon:
-            loss = F.mse_loss(x_recon, noise, reduction="none")
+            loss = F.mse_loss(x_recon, noise)
         else:
-            loss = F.mse_loss(x_recon, x_start, reduction="none")
-        loss = einops.reduce(loss, "b h d -> b", "mean")
+            loss = F.mse_loss(x_recon, x_start)
         return loss.mean()
 
     # ---------- Sampling ----------#``

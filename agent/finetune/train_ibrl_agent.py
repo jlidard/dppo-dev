@@ -107,6 +107,7 @@ class TrainIBRLAgent(TrainAgent):
         # Start training loop
         timer = Timer()
         run_results = []
+        cnt_train_step = 0
         done_venv = np.zeros((1, self.n_envs))
         while self.itr < self.n_train_itr:
             if self.itr % 1000 == 0:
@@ -187,6 +188,9 @@ class TrainIBRLAgent(TrainAgent):
 
                 # update for next step
                 prev_obs_venv = obs_venv
+
+                # count steps --- not acounting for done within action chunk
+                cnt_train_step += self.n_envs * self.act_steps if not eval_mode else 0
 
                 # check if enough eval episodes are done
                 cnt_episode += np.sum(done_venv)
@@ -299,9 +303,15 @@ class TrainIBRLAgent(TrainAgent):
                 self.save_model()
 
             # Log loss and save metrics
-            run_results.append({"itr": self.itr})
+            run_results.append(
+                {
+                    "itr": self.itr,
+                    "step": cnt_train_step,
+                }
+            )
             if self.itr % self.log_freq == 0 and self.itr > self.n_explore_steps:
                 time = timer()
+                run_results[-1]["time"] = time
                 if eval_mode:
                     log.info(
                         f"eval: success rate {success_rate:8.4f} | avg episode reward {avg_episode_reward:8.4f} | avg best reward {avg_best_reward:8.4f}"
@@ -322,11 +332,12 @@ class TrainIBRLAgent(TrainAgent):
                     run_results[-1]["eval_best_reward"] = avg_best_reward
                 else:
                     log.info(
-                        f"{self.itr}: loss actor {loss_actor:8.4f} | loss critic {loss_critic:8.4f} | reward {avg_episode_reward:8.4f} |t:{time:8.4f}"
+                        f"{self.itr}: step {cnt_train_step:8d} | loss actor {loss_actor:8.4f} | loss critic {loss_critic:8.4f} | reward {avg_episode_reward:8.4f} | t:{time:8.4f}"
                     )
                     if self.use_wandb:
                         wandb.log(
                             {
+                                "total env step": cnt_train_step,
                                 "loss - actor": loss_actor,
                                 "loss - critic": loss_critic,
                                 "avg episode reward - train": avg_episode_reward,
@@ -335,10 +346,7 @@ class TrainIBRLAgent(TrainAgent):
                             step=self.itr,
                             commit=True,
                         )
-                    run_results[-1]["loss_actor"] = loss_actor
-                    run_results[-1]["loss_critic"] = loss_critic
                     run_results[-1]["train_episode_reward"] = avg_episode_reward
-                run_results[-1]["time"] = time
                 with open(self.result_path, "wb") as f:
                     pickle.dump(run_results, f)
             self.itr += 1

@@ -71,7 +71,6 @@ class DIPODiffusion(DiffusionModel):
         loss_critic = torch.mean((current_q1 - target_q) ** 2) + torch.mean(
             (current_q2 - target_q) ** 2
         )
-
         return loss_critic
 
     def update_target_critic(self, tau):

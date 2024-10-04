@@ -107,6 +107,7 @@ class TrainIDQLDiffusionAgent(TrainAgent):
         # Start training loop
         timer = Timer()
         run_results = []
+        cnt_train_step = 0
         last_itr_eval = False
         done_venv = np.zeros((1, self.n_envs))
         while self.itr < self.n_train_itr:
@@ -182,6 +183,9 @@ class TrainIDQLDiffusionAgent(TrainAgent):
 
                 # update for next step
                 prev_obs_venv = obs_venv
+
+                # count steps --- not acounting for done within action chunk
+                cnt_train_step += self.n_envs * self.act_steps if not eval_mode else 0
 
             # Summarize episode reward --- this needs to be handled differently depending on whether the environment is reset after each iteration. Only count episodes that finish within the iteration.
             episodes_start_end = []
@@ -290,16 +294,15 @@ class TrainIDQLDiffusionAgent(TrainAgent):
 
                     # update target q function
                     self.model.update_target_critic(self.critic_tau)
-
                     loss_critic = critic_loss_q.detach() + critic_loss_v.detach()
 
                     # Update policy with collected trajectories - no weighting
-                    loss = self.model.loss(
+                    loss_actor = self.model.loss(
                         actions_b,
                         {"state": obs_b},
                     )
                     self.actor_optimizer.zero_grad()
-                    loss.backward()
+                    loss_actor.backward()
                     if self.itr >= self.n_critic_warmup_itr:
                         if self.max_grad_norm is not None:
                             torch.nn.utils.clip_grad_norm_(
@@ -324,6 +327,7 @@ class TrainIDQLDiffusionAgent(TrainAgent):
             )
             if self.itr % self.log_freq == 0:
                 time = timer()
+                run_results[-1]["time"] = time
                 if eval_mode:
                     log.info(
                         f"eval: success rate {success_rate:8.4f} | avg episode reward {avg_episode_reward:8.4f} | avg best reward {avg_best_reward:8.4f}"
@@ -344,12 +348,13 @@ class TrainIDQLDiffusionAgent(TrainAgent):
                     run_results[-1]["eval_best_reward"] = avg_best_reward
                 else:
                     log.info(
-                        f"{self.itr}: loss {loss:8.4f} | reward {avg_episode_reward:8.4f} |t:{time:8.4f}"
+                        f"{self.itr}: step {cnt_train_step:8d} | loss actor {loss_actor:8.4f} | reward {avg_episode_reward:8.4f} | t:{time:8.4f}"
                     )
                     if self.use_wandb:
                         wandb.log(
                             {
-                                "loss": loss,
+                                "total env step": cnt_train_step,
+                                "loss - actor": loss_actor,
                                 "loss - critic": loss_critic,
                                 "avg episode reward - train": avg_episode_reward,
                                 "num episode - train": num_episode_finished,
@@ -357,10 +362,7 @@ class TrainIDQLDiffusionAgent(TrainAgent):
                             step=self.itr,
                             commit=True,
                         )
-                    run_results[-1]["loss"] = loss
-                    run_results[-1]["loss_critic"] = loss_critic
                     run_results[-1]["train_episode_reward"] = avg_episode_reward
-                run_results[-1]["time"] = time
                 with open(self.result_path, "wb") as f:
                     pickle.dump(run_results, f)
             self.itr += 1
