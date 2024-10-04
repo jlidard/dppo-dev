@@ -26,7 +26,7 @@ from util.scheduler import CosineAnnealingWarmupRestarts
 def td_values(
     states,
     rewards,
-    dones,
+    terminateds,
     state_values,
     gamma=0.99,
     alpha=0.95,
@@ -43,21 +43,20 @@ def td_values(
     """
     sample_count = len(states)
     tds = np.zeros_like(state_values, dtype=np.float32)
-    dones[-1] = 1
-    next_value = 1 - dones[-1]
+    next_value = state_values[-1].copy()
+    next_value[terminateds[-1]] = 0.0
 
     val = 0.0
     for i in range(sample_count - 1, -1, -1):
-        # next_value = 0.0 if dones[i] else state_values[i + 1]
 
         # get next_value for vectorized
         if i < sample_count - 1:
             next_value = state_values[i + 1]
-            next_value = next_value * (1 - dones[i])
+            next_value = next_value * (1 - terminateds[i])
 
         state_value = state_values[i]
         error = rewards[i] + gamma * next_value - state_value
-        val = alpha * error + gamma * lam * (1 - dones[i]) * val
+        val = alpha * error + gamma * lam * (1 - terminateds[i]) * val
 
         tds[i] = val + state_value
     return tds
@@ -127,8 +126,7 @@ class TrainAWRDiffusionAgent(TrainAgent):
         obs_buffer = deque(maxlen=self.buffer_size)
         action_buffer = deque(maxlen=self.buffer_size)
         reward_buffer = deque(maxlen=self.buffer_size)
-        done_buffer = deque(maxlen=self.buffer_size)
-        first_buffer = deque(maxlen=self.buffer_size)
+        terminated_buffer = deque(maxlen=self.buffer_size)
 
         # Start training loop
         timer = Timer()
@@ -156,10 +154,9 @@ class TrainAWRDiffusionAgent(TrainAgent):
                 prev_obs_venv = self.reset_env_all(options_venv=options_venv)
                 firsts_trajs[0] = 1
             else:
-                firsts_trajs[0] = (
-                    done_venv  # if done at the end of last iteration, then the envs are just reset
-                )
-            reward_trajs = np.empty((0, self.n_envs))
+                # if done at the end of last iteration, the envs are just reset
+                firsts_trajs[0] = done_venv
+            reward_trajs = np.zeros((self.n_steps, self.n_envs))
 
             # Collect a set of trajectories from env
             for step in range(self.n_steps):
@@ -184,19 +181,21 @@ class TrainAWRDiffusionAgent(TrainAgent):
                 action_venv = samples[:, : self.act_steps]
 
                 # Apply multi-step action
-                obs_venv, reward_venv, done_venv, info_venv = self.venv.step(
-                    action_venv
+                obs_venv, reward_venv, terminated_venv, truncated_venv, info_venv = (
+                    self.venv.step(action_venv)
                 )
-                reward_trajs = np.vstack((reward_trajs, reward_venv[None]))
+                done_venv = terminated_venv | truncated_venv
+                reward_trajs[step] = reward_venv
+                firsts_trajs[step + 1] = done_venv
 
                 # add to buffer
-                obs_buffer.append(prev_obs_venv["state"])
-                action_buffer.append(action_venv)
-                reward_buffer.append(reward_venv * self.scale_reward_factor)
-                done_buffer.append(done_venv)
-                first_buffer.append(firsts_trajs[step])
+                if not eval_mode:
+                    obs_buffer.append(prev_obs_venv["state"])
+                    action_buffer.append(action_venv)
+                    reward_buffer.append(reward_venv * self.scale_reward_factor)
+                    terminated_buffer.append(terminated_venv)
 
-                firsts_trajs[step + 1] = done_venv
+                # update for next step
                 prev_obs_venv = obs_venv
 
             # Summarize episode reward --- this needs to be handled differently depending on whether the environment is reset after each iteration. Only count episodes that finish within the iteration.
@@ -240,7 +239,7 @@ class TrainAWRDiffusionAgent(TrainAgent):
             if not eval_mode:
                 obs_trajs = np.array(deepcopy(obs_buffer))  # assume only state
                 reward_trajs = np.array(deepcopy(reward_buffer))
-                dones_trajs = np.array(deepcopy(done_buffer))
+                terminated_trajs = np.array(deepcopy(terminated_buffer))
                 obs_t = einops.rearrange(
                     torch.from_numpy(obs_trajs).float().to(self.device),
                     "s e h d -> (s e) h d",
@@ -248,7 +247,9 @@ class TrainAWRDiffusionAgent(TrainAgent):
                 values_trajs = np.array(
                     self.model.critic({"state": obs_t}).detach().cpu().numpy()
                 ).reshape(-1, self.n_envs)
-                td_trajs = td_values(obs_trajs, reward_trajs, dones_trajs, values_trajs)
+                td_trajs = td_values(
+                    obs_trajs, reward_trajs, terminated_trajs, values_trajs
+                )
                 td_t = torch.from_numpy(td_trajs.flatten()).float().to(self.device)
 
                 # Update critic
@@ -268,7 +269,7 @@ class TrainAWRDiffusionAgent(TrainAgent):
                 obs_trajs = np.array(deepcopy(obs_buffer))
                 samples_trajs = np.array(deepcopy(action_buffer))
                 reward_trajs = np.array(deepcopy(reward_buffer))
-                dones_trajs = np.array(deepcopy(done_buffer))
+                terminated_trajs = np.array(deepcopy(terminated_buffer))
                 obs_t = einops.rearrange(
                     torch.from_numpy(obs_trajs).float().to(self.device),
                     "s e h d -> (s e) h d",
@@ -276,7 +277,9 @@ class TrainAWRDiffusionAgent(TrainAgent):
                 values_trajs = np.array(
                     self.model.critic({"state": obs_t}).detach().cpu().numpy()
                 ).reshape(-1, self.n_envs)
-                td_trajs = td_values(obs_trajs, reward_trajs, dones_trajs, values_trajs)
+                td_trajs = td_values(
+                    obs_trajs, reward_trajs, terminated_trajs, values_trajs
+                )
                 advantages_trajs = td_trajs - values_trajs
 
                 # flatten

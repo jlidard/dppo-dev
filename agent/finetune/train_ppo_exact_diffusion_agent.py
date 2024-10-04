@@ -50,42 +50,39 @@ class TrainPPOExactDiffusionAgent(TrainPPODiffusionAgent):
             last_itr_eval = eval_mode
 
             # Reset env before iteration starts (1) if specified, (2) at eval mode, or (3) right after eval mode
-            dones_trajs = np.zeros((self.n_steps, self.n_envs))
             firsts_trajs = np.zeros((self.n_steps + 1, self.n_envs))
             if self.reset_at_iteration or eval_mode or last_itr_eval:
                 prev_obs_venv = self.reset_env_all(options_venv=options_venv)
                 firsts_trajs[0] = 1
             else:
-                firsts_trajs[0] = (
-                    done_venv  # if done at the end of last iteration, then the envs are just reset
-                )
+                # if done at the end of last iteration, the envs are just reset
+                firsts_trajs[0] = done_venv
 
             # Holder
             obs_trajs = {
-                "state": np.empty((0, self.n_envs, self.n_cond_step, self.obs_dim))
+                "state": np.zeros(
+                    (self.n_steps, self.n_envs, self.n_cond_step, self.obs_dim)
+                )
             }
-            samples_trajs = np.empty(
+            samples_trajs = np.zeros(
                 (
-                    0,
+                    self.n_steps,
                     self.n_envs,
                     self.horizon_steps,
                     self.action_dim,
                 )
             )
-            chains_trajs = np.empty(
+            chains_trajs = np.zeros(
                 (
-                    0,
+                    self.n_steps,
                     self.n_envs,
                     self.model.ft_denoising_steps + 1,
                     self.horizon_steps,
                     self.action_dim,
                 )
             )
-            reward_trajs = np.empty((0, self.n_envs))
-            obs_full_trajs = np.empty((0, self.n_envs, self.obs_dim))
-            obs_full_trajs = np.vstack(
-                (obs_full_trajs, prev_obs_venv["state"][:, -1][None])
-            )  # save current obs
+            terminated_trajs = np.zeros((self.n_steps, self.n_envs))
+            reward_trajs = np.zeros((self.n_steps, self.n_envs))
 
             # Collect a set of trajectories from env
             for step in range(self.n_steps):
@@ -111,26 +108,20 @@ class TrainPPOExactDiffusionAgent(TrainPPODiffusionAgent):
                         samples.chains.cpu().numpy()
                     )  # n_env x denoising x horizon x act
                 action_venv = output_venv[:, : self.act_steps]
-                samples_trajs = np.vstack((samples_trajs, output_venv[None]))
+                samples_trajs[step] = output_venv
 
                 # Apply multi-step action
-                obs_venv, reward_venv, done_venv, info_venv = self.venv.step(
-                    action_venv
+                obs_venv, reward_venv, terminated_venv, truncated_venv, info_venv = (
+                    self.venv.step(action_venv)
                 )
-                if self.save_full_observations:  # state-only
-                    obs_full_venv = np.array(
-                        [info["full_obs"]["state"] for info in info_venv]
-                    )  # n_envs x act_steps x obs_dim
-                    obs_full_trajs = np.vstack(
-                        (obs_full_trajs, obs_full_venv.transpose(1, 0, 2))
-                    )
-                obs_trajs["state"] = np.vstack(
-                    (obs_trajs["state"], prev_obs_venv["state"][None])
-                )
-                chains_trajs = np.vstack((chains_trajs, chains_venv[None]))
-                reward_trajs = np.vstack((reward_trajs, reward_venv[None]))
-                dones_trajs[step] = done_venv
+                done_venv = terminated_venv | truncated_venv
+                obs_trajs["state"][step] = prev_obs_venv["state"]
+                chains_trajs[step] = chains_venv
+                reward_trajs[step] = reward_venv
+                terminated_trajs[step] = terminated_venv
                 firsts_trajs[step + 1] = done_venv
+
+                # update for next step
                 prev_obs_venv = obs_venv
 
             # Summarize episode reward --- this needs to be handled differently depending on whether the environment is reset after each iteration. Only count episodes that finish within the iteration.
@@ -214,7 +205,7 @@ class TrainPPOExactDiffusionAgent(TrainPPODiffusionAgent):
                         )
                         reward_trajs = reward_trajs_transpose.T
 
-                    # bootstrap value with GAE if not done - apply reward scaling with constant if specified
+                    # bootstrap value with GAE if not terminal - apply reward scaling with constant if specified
                     obs_venv_ts = {
                         "state": torch.from_numpy(obs_venv["state"])
                         .float()
@@ -232,7 +223,7 @@ class TrainPPOExactDiffusionAgent(TrainPPODiffusionAgent):
                             )
                         else:
                             nextvalues = values_trajs[t + 1]
-                        nonterminal = 1.0 - dones_trajs[t]
+                        nonterminal = 1.0 - terminated_trajs[t]
                         # delta = r + gamma*V(st+1) - V(st)
                         delta = (
                             reward_trajs[t] * self.reward_scale_const
@@ -343,20 +334,6 @@ class TrainPPOExactDiffusionAgent(TrainPPODiffusionAgent):
                     np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
                 )
 
-            # Plot state trajectories (only in D3IL)
-            if (
-                self.itr % self.render_freq == 0
-                and self.n_render > 0
-                and self.traj_plotter is not None
-            ):
-                self.traj_plotter(
-                    obs_full_trajs=obs_full_trajs,
-                    n_render=self.n_render,
-                    max_episode_steps=self.max_episode_steps,
-                    render_dir=self.render_dir,
-                    itr=self.itr,
-                )
-
             # Update lr
             if self.itr >= self.n_critic_warmup_itr:
                 self.actor_lr_scheduler.step()
@@ -373,7 +350,6 @@ class TrainPPOExactDiffusionAgent(TrainPPODiffusionAgent):
                 }
             )
             if self.save_trajs:
-                run_results[-1]["obs_full_trajs"] = obs_full_trajs
                 run_results[-1]["obs_trajs"] = obs_trajs
                 run_results[-1]["action_trajs"] = samples_trajs
                 run_results[-1]["chains_trajs"] = chains_trajs

@@ -36,7 +36,7 @@ class DQLDiffusion(DiffusionModel):
 
     # ---------- RL training ----------#
 
-    def loss_critic(self, obs, next_obs, actions, rewards, dones, gamma):
+    def loss_critic(self, obs, next_obs, actions, rewards, terminated, gamma):
 
         # get current Q-function
         current_q1, current_q2 = self.critic(obs, actions)
@@ -50,7 +50,7 @@ class DQLDiffusion(DiffusionModel):
         next_q = torch.min(next_q1, next_q2)
 
         # terminal state mask
-        mask = 1 - dones
+        mask = 1 - terminated
 
         # flatten
         rewards = rewards.view(-1)

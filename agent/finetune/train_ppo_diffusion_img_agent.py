@@ -58,31 +58,32 @@ class TrainPPOImgDiffusionAgent(TrainPPODiffusionAgent):
             last_itr_eval = eval_mode
 
             # Reset env before iteration starts (1) if specified, (2) at eval mode, or (3) right after eval mode
-            dones_trajs = np.zeros((self.n_steps, self.n_envs))
             firsts_trajs = np.zeros((self.n_steps + 1, self.n_envs))
             if self.reset_at_iteration or eval_mode or last_itr_eval:
                 prev_obs_venv = self.reset_env_all(options_venv=options_venv)
                 firsts_trajs[0] = 1
             else:
-                firsts_trajs[0] = (
-                    done_venv  # if done at the end of last iteration, then the envs are just reset
-                )
+                # if done at the end of last iteration, the envs are just reset
+                firsts_trajs[0] = done_venv
 
             # Holder
             obs_trajs = {
-                k: np.empty((0, self.n_envs, self.n_cond_step, *self.obs_dims[k]))
+                k: np.zeros(
+                    (self.n_steps, self.n_envs, self.n_cond_step, *self.obs_dims[k])
+                )
                 for k in self.obs_dims
             }
-            chains_trajs = np.empty(
+            chains_trajs = np.zeros(
                 (
-                    0,
+                    self.n_steps,
                     self.n_envs,
                     self.model.ft_denoising_steps + 1,
                     self.horizon_steps,
                     self.action_dim,
                 )
             )
-            reward_trajs = np.empty((0, self.n_envs))
+            terminated_trajs = np.zeros((self.n_steps, self.n_envs))
+            reward_trajs = np.zeros((self.n_steps, self.n_envs))
 
             # Collect a set of trajectories from env
             for step in range(self.n_steps):
@@ -111,15 +112,18 @@ class TrainPPOImgDiffusionAgent(TrainPPODiffusionAgent):
                 action_venv = output_venv[:, : self.act_steps]
 
                 # Apply multi-step action
-                obs_venv, reward_venv, done_venv, info_venv = self.venv.step(
-                    action_venv
+                obs_venv, reward_venv, terminated_venv, truncated_venv, info_venv = (
+                    self.venv.step(action_venv)
                 )
+                done_venv = terminated_venv | truncated_venv
                 for k in obs_trajs:
-                    obs_trajs[k] = np.vstack((obs_trajs[k], prev_obs_venv[k][None]))
-                chains_trajs = np.vstack((chains_trajs, chains_venv[None]))
-                reward_trajs = np.vstack((reward_trajs, reward_venv[None]))
-                dones_trajs[step] = done_venv
+                    obs_trajs[k][step] = prev_obs_venv[k]
+                chains_trajs[step] = chains_venv
+                reward_trajs[step] = reward_venv
+                terminated_trajs[step] = terminated_venv
                 firsts_trajs[step + 1] = done_venv
+                
+                # update for next step
                 prev_obs_venv = obs_venv
 
             # Summarize episode reward --- this needs to be handled differently depending on whether the environment is reset after each iteration. Only count episodes that finish within the iteration.
@@ -235,7 +239,7 @@ class TrainPPOImgDiffusionAgent(TrainPPODiffusionAgent):
                         )
                         reward_trajs = reward_trajs_transpose.T
 
-                    # bootstrap value with GAE if not done - apply reward scaling with constant if specified
+                    # bootstrap value with GAE if not terminal - apply reward scaling with constant if specified
                     obs_venv_ts = {
                         key: torch.from_numpy(obs_venv[key]).float().to(self.device)
                         for key in self.obs_dims
@@ -252,7 +256,7 @@ class TrainPPOImgDiffusionAgent(TrainPPODiffusionAgent):
                             )
                         else:
                             nextvalues = values_trajs[t + 1]
-                        nonterminal = 1.0 - dones_trajs[t]
+                        nonterminal = 1.0 - terminated_trajs[t]
                         # delta = r + gamma*V(st+1) - V(st)
                         delta = (
                             reward_trajs[t] * self.reward_scale_const

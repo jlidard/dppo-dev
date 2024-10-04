@@ -84,8 +84,7 @@ class TrainDQLDiffusionAgent(TrainAgent):
         next_obs_buffer = deque(maxlen=self.buffer_size)
         action_buffer = deque(maxlen=self.buffer_size)
         reward_buffer = deque(maxlen=self.buffer_size)
-        done_buffer = deque(maxlen=self.buffer_size)
-        first_buffer = deque(maxlen=self.buffer_size)
+        terminated_buffer = deque(maxlen=self.buffer_size)
 
         # Start training loop
         timer = Timer()
@@ -113,10 +112,9 @@ class TrainDQLDiffusionAgent(TrainAgent):
                 prev_obs_venv = self.reset_env_all(options_venv=options_venv)
                 firsts_trajs[0] = 1
             else:
-                firsts_trajs[0] = (
-                    done_venv  # if done at the end of last iteration, then the envs are just reset
-                )
-            reward_trajs = np.empty((0, self.n_envs))
+                # if done at the end of last iteration, the envs are just reset
+                firsts_trajs[0] = done_venv
+            reward_trajs = np.zeros((self.n_steps, self.n_envs))
 
             # Collect a set of trajectories from env
             for step in range(self.n_steps):
@@ -141,21 +139,28 @@ class TrainDQLDiffusionAgent(TrainAgent):
                 action_venv = samples[:, : self.act_steps]
 
                 # Apply multi-step action
-                obs_venv, reward_venv, done_venv, info_venv = self.venv.step(
-                    action_venv
+                obs_venv, reward_venv, terminated_venv, truncated_venv, info_venv = (
+                    self.venv.step(action_venv)
                 )
-                reward_trajs = np.vstack((reward_trajs, reward_venv[None]))
+                done_venv = terminated_venv | truncated_venv
+                reward_trajs[step] = reward_venv
+                firsts_trajs[step + 1] = done_venv
 
                 # add to buffer
-                for i in range(self.n_envs):
-                    obs_buffer.append(prev_obs_venv["state"][i])
-                    next_obs_buffer.append(obs_venv["state"][i])
-                    action_buffer.append(action_venv[i])
-                    reward_buffer.append(reward_venv[i] * self.scale_reward_factor)
-                    done_buffer.append(done_venv[i])
-                first_buffer.append(firsts_trajs[step])
+                if not eval_mode:
+                    for i in range(self.n_envs):
+                        obs_buffer.append(prev_obs_venv["state"][i])
+                        if truncated_venv[i]:  # truncated
+                            next_obs_buffer.append(info_venv[i]["final_obs"]["state"])
+                        else:
+                            next_obs_buffer.append(obs_venv["state"][i])
+                        action_buffer.append(action_venv[i])
+                    reward_buffer.extend(
+                        (reward_venv * self.scale_reward_factor).tolist()
+                    )
+                    terminated_buffer.extend(terminated_venv.tolist())
 
-                firsts_trajs[step + 1] = done_venv
+                # update for next step
                 prev_obs_venv = obs_venv
 
             # Summarize episode reward --- this needs to be handled differently depending on whether the environment is reset after each iteration. Only count episodes that finish within the iteration.
@@ -204,31 +209,27 @@ class TrainDQLDiffusionAgent(TrainAgent):
                     # Sample batch
                     inds = np.random.choice(len(obs_buffer), self.batch_size)
                     obs_b = (
-                        torch.from_numpy(np.vstack([obs_buffer[i][None] for i in inds]))
+                        torch.from_numpy(np.array([obs_buffer[i] for i in inds]))
                         .float()
                         .to(self.device)
                     )
                     next_obs_b = (
-                        torch.from_numpy(
-                            np.vstack([next_obs_buffer[i][None] for i in inds])
-                        )
+                        torch.from_numpy(np.array([next_obs_buffer[i] for i in inds]))
                         .float()
                         .to(self.device)
                     )
                     actions_b = (
-                        torch.from_numpy(
-                            np.vstack([action_buffer[i][None] for i in inds])
-                        )
+                        torch.from_numpy(np.array([action_buffer[i] for i in inds]))
                         .float()
                         .to(self.device)
                     )
                     rewards_b = (
-                        torch.from_numpy(np.vstack([reward_buffer[i] for i in inds]))
+                        torch.from_numpy(np.array([reward_buffer[i] for i in inds]))
                         .float()
                         .to(self.device)
                     )
-                    dones_b = (
-                        torch.from_numpy(np.vstack([done_buffer[i] for i in inds]))
+                    terminated_b = (
+                        torch.from_numpy(np.array([terminated_buffer[i] for i in inds]))
                         .float()
                         .to(self.device)
                     )
@@ -239,7 +240,7 @@ class TrainDQLDiffusionAgent(TrainAgent):
                         {"state": next_obs_b},
                         actions_b,
                         rewards_b,
-                        dones_b,
+                        terminated_b,
                         self.gamma,
                     )
                     self.critic_optimizer.zero_grad()

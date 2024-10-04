@@ -62,7 +62,7 @@ class IDQLDiffusion(RWRDiffusion):
 
         return v_loss
 
-    def loss_critic_q(self, obs, next_obs, actions, rewards, dones, gamma):
+    def loss_critic_q(self, obs, next_obs, actions, rewards, terminated, gamma):
 
         # get current Q-function
         current_q1, current_q2 = self.critic_q(obs, actions)
@@ -72,7 +72,7 @@ class IDQLDiffusion(RWRDiffusion):
             next_v = self.critic_v(next_obs)
 
         # terminal state mask
-        mask = 1 - dones
+        mask = 1 - terminated
 
         # flatten
         rewards = rewards.view(-1)

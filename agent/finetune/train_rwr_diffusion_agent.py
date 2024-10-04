@@ -76,23 +76,24 @@ class TrainRWRDiffusionAgent(TrainAgent):
                 prev_obs_venv = self.reset_env_all(options_venv=options_venv)
                 firsts_trajs[0] = 1
             else:
-                firsts_trajs[
-                    0
-                ] = done_venv  # if done at the end of last iteration, then the envs are just reset
+                # if done at the end of last iteration, the envs are just reset
+                firsts_trajs[0] = done_venv
 
             # Holder
             obs_trajs = {
-                "state": np.empty((0, self.n_envs, self.n_cond_step, self.obs_dim))
+                "state": np.zeros(
+                    (self.n_steps, self.n_envs, self.n_cond_step, self.obs_dim)
+                )
             }
-            samples_trajs = np.empty(
+            samples_trajs = np.zeros(
                 (
-                    0,
+                    self.n_steps,
                     self.n_envs,
                     self.horizon_steps,
                     self.action_dim,
                 )
             )
-            reward_trajs = np.empty((0, self.n_envs))
+            reward_trajs = np.zeros((self.n_steps, self.n_envs))
 
             # Collect a set of trajectories from env
             for step in range(self.n_steps):
@@ -115,17 +116,20 @@ class TrainRWRDiffusionAgent(TrainAgent):
                         .numpy()
                     )  # n_env x horizon x act
                 action_venv = samples[:, : self.act_steps]
-                samples_trajs = np.vstack((samples_trajs, samples[None]))
+                samples_trajs[step] = samples
 
                 # Apply multi-step action
-                obs_venv, reward_venv, done_venv, info_venv = self.venv.step(
-                    action_venv
+                obs_venv, reward_venv, terminated_venv, truncated_venv, info_venv = (
+                    self.venv.step(action_venv)
                 )
-                obs_trajs["state"] = np.vstack(
-                    (obs_trajs["state"], prev_obs_venv["state"][None])
-                )
-                reward_trajs = np.vstack((reward_trajs, reward_venv[None]))
+                done_venv = terminated_venv | truncated_venv
+
+                # save
+                obs_trajs["state"][step] = prev_obs_venv["state"]
+                reward_trajs[step] = reward_venv
                 firsts_trajs[step + 1] = done_venv
+
+                # update for next step
                 prev_obs_venv = obs_venv
 
             # Summarize episode reward --- this needs to be handled differently depending on whether the environment is reset after each iteration. Only count episodes that finish within the iteration.

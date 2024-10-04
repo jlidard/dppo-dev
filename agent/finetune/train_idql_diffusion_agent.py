@@ -102,8 +102,7 @@ class TrainIDQLDiffusionAgent(TrainAgent):
         next_obs_buffer = deque(maxlen=self.buffer_size)
         action_buffer = deque(maxlen=self.buffer_size)
         reward_buffer = deque(maxlen=self.buffer_size)
-        done_buffer = deque(maxlen=self.buffer_size)
-        first_buffer = deque(maxlen=self.buffer_size)
+        terminated_buffer = deque(maxlen=self.buffer_size)
 
         # Start training loop
         timer = Timer()
@@ -131,10 +130,9 @@ class TrainIDQLDiffusionAgent(TrainAgent):
                 prev_obs_venv = self.reset_env_all(options_venv=options_venv)
                 firsts_trajs[0] = 1
             else:
-                firsts_trajs[0] = (
-                    done_venv  # if done at the end of last iteration, then the envs are just reset
-                )
-            reward_trajs = np.empty((0, self.n_envs))
+                # if done at the end of last iteration, the envs are just reset
+                firsts_trajs[0] = done_venv
+            reward_trajs = np.zeros((self.n_steps, self.n_envs))
 
             # Collect a set of trajectories from env
             for step in range(self.n_steps):
@@ -161,20 +159,28 @@ class TrainIDQLDiffusionAgent(TrainAgent):
                 action_venv = samples[:, : self.act_steps]
 
                 # Apply multi-step action
-                obs_venv, reward_venv, done_venv, info_venv = self.venv.step(
-                    action_venv
+                obs_venv, reward_venv, terminated_venv, truncated_venv, info_venv = (
+                    self.venv.step(action_venv)
                 )
-                reward_trajs = np.vstack((reward_trajs, reward_venv[None]))
+                done_venv = terminated_venv | truncated_venv
+                reward_trajs[step] = reward_venv
+                firsts_trajs[step + 1] = done_venv
 
                 # add to buffer
-                obs_buffer.append(prev_obs_venv["state"])
-                next_obs_buffer.append(obs_venv["state"])
-                action_buffer.append(action_venv)
-                reward_buffer.append(reward_venv * self.scale_reward_factor)
-                done_buffer.append(done_venv)
-                first_buffer.append(firsts_trajs[step])
+                if not eval_mode:
+                    obs_venv_copy = obs_venv.copy()
+                    for i in range(self.n_envs):
+                        if truncated_venv[i]:
+                            obs_venv_copy["state"][i] = info_venv[i]["final_obs"][
+                                "state"
+                            ]
+                    obs_buffer.append(prev_obs_venv["state"])
+                    next_obs_buffer.append(obs_venv_copy["state"])
+                    action_buffer.append(action_venv)
+                    reward_buffer.append(reward_venv * self.scale_reward_factor)
+                    terminated_buffer.append(terminated_venv)
 
-                firsts_trajs[step + 1] = done_venv
+                # update for next step
                 prev_obs_venv = obs_venv
 
             # Summarize episode reward --- this needs to be handled differently depending on whether the environment is reset after each iteration. Only count episodes that finish within the iteration.
@@ -221,8 +227,7 @@ class TrainIDQLDiffusionAgent(TrainAgent):
                 action_trajs = np.array(deepcopy(action_buffer))
                 next_obs_trajs = np.array(deepcopy(next_obs_buffer))
                 reward_trajs = np.array(deepcopy(reward_buffer))
-                done_trajs = np.array(deepcopy(done_buffer))
-                first_trajs = np.array(deepcopy(first_buffer))
+                terminated_trajs = np.array(deepcopy(terminated_buffer))
 
                 # flatten
                 obs_trajs = einops.rearrange(
@@ -238,8 +243,7 @@ class TrainIDQLDiffusionAgent(TrainAgent):
                     "s e h d -> (s e) h d",
                 )
                 reward_trajs = reward_trajs.reshape(-1)
-                done_trajs = done_trajs.reshape(-1)
-                first_trajs = first_trajs.reshape(-1)
+                terminated_trajs = terminated_trajs.reshape(-1)
 
                 num_batch = int(
                     self.n_steps * self.n_envs / self.batch_size * self.replay_ratio
@@ -259,7 +263,9 @@ class TrainIDQLDiffusionAgent(TrainAgent):
                     reward_b = (
                         torch.from_numpy(reward_trajs[inds]).float().to(self.device)
                     )
-                    done_b = torch.from_numpy(done_trajs[inds]).float().to(self.device)
+                    terminated_b = (
+                        torch.from_numpy(terminated_trajs[inds]).float().to(self.device)
+                    )
 
                     # update critic value function
                     critic_loss_v = self.model.loss_critic_v(
@@ -275,7 +281,7 @@ class TrainIDQLDiffusionAgent(TrainAgent):
                         {"state": next_obs_b},
                         actions_b,
                         reward_b,
-                        done_b,
+                        terminated_b,
                         self.gamma,
                     )
                     self.critic_q_optimizer.zero_grad()
