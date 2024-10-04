@@ -77,6 +77,9 @@ class TrainDQLDiffusionAgent(TrainAgent):
         # Updates
         self.replay_ratio = cfg.train.replay_ratio
 
+        # critic target update rate
+        self.target_ema_rate = cfg.train.target_ema_rate
+
     def run(self):
 
         # make a FIFO replay buffer for obs, action, and reward
@@ -247,23 +250,12 @@ class TrainDQLDiffusionAgent(TrainAgent):
                     loss_critic.backward()
                     self.critic_optimizer.step()
 
-                    # get the new action and q values
-                    samples = self.model.forward_train(
-                        cond={"state": obs_b},
-                        deterministic=eval_mode,
-                    )
-                    action_venv = samples[:, : self.act_steps]  # n_env x horizon x act
-                    q_values_b = self.model.critic({"state": obs_b}, action_venv)
-                    q1_new_action, q2_new_action = q_values_b
-
                     # Update policy with collected trajectories
                     self.actor_optimizer.zero_grad()
                     actor_loss = self.model.loss_actor(
                         {"state": obs_b},
-                        actions_b,
-                        q1_new_action,
-                        q2_new_action,
                         self.eta,
+                        self.act_steps,
                     )
                     actor_loss.backward()
                     if self.itr >= self.n_critic_warmup_itr:
@@ -273,6 +265,9 @@ class TrainDQLDiffusionAgent(TrainAgent):
                             )
                         self.actor_optimizer.step()
                     loss = actor_loss
+
+                    # update target
+                    self.model.update_target_critic(self.target_ema_rate)
 
             # Update lr
             self.actor_lr_scheduler.step()

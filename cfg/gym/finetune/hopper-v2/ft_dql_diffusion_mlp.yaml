@@ -65,6 +65,7 @@ train:
     num: 0
   # DQL specific
   scale_reward_factor: 0.01
+  target_ema_rate: 0.005
   eta: 1.0
   buffer_size: 400000
   batch_size: 5000

@@ -47,24 +47,25 @@ class DIPODiffusion(DiffusionModel):
         # get current Q-function
         current_q1, current_q2 = self.critic(obs, actions)
 
-        # get next Q-function
-        next_actions = self.forward(
-            cond=next_obs,
-            deterministic=False,
-        )  # forward() has no gradient, which is desired here.
-        next_q1, next_q2 = self.critic_target(next_obs, next_actions)
-        next_q = torch.min(next_q1, next_q2)
+        with torch.no_grad():
+            # get next Q-function
+            next_actions = self.forward(
+                cond=next_obs,
+                deterministic=False,
+            )  # forward() has no gradient, which is desired here.
+            next_q1, next_q2 = self.critic_target(next_obs, next_actions)
+            next_q = torch.min(next_q1, next_q2)
 
-        # terminal state mask
-        mask = 1 - terminated
+            # terminal state mask
+            mask = 1 - terminated
 
-        # flatten
-        rewards = rewards.view(-1)
-        next_q = next_q.view(-1)
-        mask = mask.view(-1)
+            # flatten
+            rewards = rewards.view(-1)
+            next_q = next_q.view(-1)
+            mask = mask.view(-1)
 
-        # target value
-        target_q = rewards + gamma * next_q * mask
+            # target value
+            target_q = rewards + gamma * next_q * mask
 
         # Update critic
         loss_critic = torch.mean((current_q1 - target_q) ** 2) + torch.mean(
