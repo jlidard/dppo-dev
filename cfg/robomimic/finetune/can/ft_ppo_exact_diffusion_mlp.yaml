@@ -92,7 +92,6 @@ model:
   sde_min_beta: 1e-10
   sde_probability_flow: True
   #
-  gamma_denoising: 0.99
   clip_ploss_coef: 0.01
   min_sampling_denoising_std: 0.1
   min_logprob_denoising_std: 0.1
