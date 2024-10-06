@@ -14,11 +14,6 @@ log = logging.getLogger(__name__)
 from model.diffusion.diffusion_rwr import RWRDiffusion
 
 
-def expectile_loss(diff, expectile=0.8):
-    weight = torch.where(diff > 0, expectile, (1 - expectile))
-    return weight * (diff**2)
-
-
 class QSMDiffusion(RWRDiffusion):
 
     def __init__(

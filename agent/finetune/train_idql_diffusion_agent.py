@@ -226,6 +226,9 @@ class TrainIDQLDiffusionAgent(TrainAgent):
 
             # Update models
             if not eval_mode:
+                num_batch = int(
+                    self.n_steps * self.n_envs / self.batch_size * self.replay_ratio
+                )
 
                 obs_trajs = np.array(deepcopy(obs_buffer))
                 action_trajs = np.array(deepcopy(action_buffer))
@@ -248,11 +251,6 @@ class TrainIDQLDiffusionAgent(TrainAgent):
                 )
                 reward_trajs = reward_trajs.reshape(-1)
                 terminated_trajs = terminated_trajs.reshape(-1)
-
-                num_batch = int(
-                    self.n_steps * self.n_envs / self.batch_size * self.replay_ratio
-                )
-
                 for _ in range(num_batch):
 
                     # Sample batch
@@ -323,6 +321,7 @@ class TrainIDQLDiffusionAgent(TrainAgent):
             run_results.append(
                 {
                     "itr": self.itr,
+                    "step": cnt_train_step,
                 }
             )
             if self.itr % self.log_freq == 0:

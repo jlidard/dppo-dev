@@ -209,37 +209,24 @@ class TrainDQLDiffusionAgent(TrainAgent):
 
             # Update models
             if not eval_mode:
-                num_batch = self.replay_ratio
+                num_batch = int(
+                    self.n_steps * self.n_envs / self.batch_size * self.replay_ratio
+                )
+                # only worth converting first with parallel envs - large number of updates below
+                obs_array = np.array(obs_buffer)
+                next_obs_array = np.array(next_obs_buffer)
+                action_array = np.array(action_buffer)
+                reward_array = np.array(reward_buffer)
+                terminated_array = np.array(terminated_buffer)
 
                 # Critic learning
                 for _ in range(num_batch):
-                    # Sample batch
                     inds = np.random.choice(len(obs_buffer), self.batch_size)
-                    obs_b = (
-                        torch.from_numpy(np.array([obs_buffer[i] for i in inds]))
-                        .float()
-                        .to(self.device)
-                    )
-                    next_obs_b = (
-                        torch.from_numpy(np.array([next_obs_buffer[i] for i in inds]))
-                        .float()
-                        .to(self.device)
-                    )
-                    actions_b = (
-                        torch.from_numpy(np.array([action_buffer[i] for i in inds]))
-                        .float()
-                        .to(self.device)
-                    )
-                    rewards_b = (
-                        torch.from_numpy(np.array([reward_buffer[i] for i in inds]))
-                        .float()
-                        .to(self.device)
-                    )
-                    terminated_b = (
-                        torch.from_numpy(np.array([terminated_buffer[i] for i in inds]))
-                        .float()
-                        .to(self.device)
-                    )
+                    obs_b = torch.from_numpy(obs_array[inds]).float().to(self.device)
+                    next_obs_b = torch.from_numpy(next_obs_array[inds]).float().to(self.device)
+                    actions_b = torch.from_numpy(action_array[inds]).float().to(self.device)
+                    rewards_b = torch.from_numpy(reward_array[inds]).float().to(self.device)
+                    terminated_b = torch.from_numpy(terminated_array[inds]).float().to(self.device)
 
                     # Update critic
                     loss_critic = self.model.loss_critic(

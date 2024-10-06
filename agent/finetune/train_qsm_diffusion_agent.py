@@ -202,6 +202,9 @@ class TrainQSMDiffusionAgent(TrainAgent):
 
             # Update models
             if not eval_mode:
+                num_batch = int(
+                    self.n_steps * self.n_envs / self.batch_size * self.replay_ratio
+                )
 
                 obs_trajs = np.array(deepcopy(obs_buffer))
                 action_trajs = np.array(deepcopy(action_buffer))
@@ -224,14 +227,7 @@ class TrainQSMDiffusionAgent(TrainAgent):
                 )
                 reward_trajs = reward_trajs.reshape(-1)
                 terminated_trajs = terminated_trajs.reshape(-1)
-
-                num_batch = int(
-                    self.n_steps * self.n_envs / self.batch_size * self.replay_ratio
-                )
-
                 for _ in range(num_batch):
-
-                    # Sample batch
                     inds = np.random.choice(len(obs_trajs), self.batch_size)
                     obs_b = torch.from_numpy(obs_trajs[inds]).float().to(self.device)
                     next_obs_b = (
@@ -240,7 +236,7 @@ class TrainQSMDiffusionAgent(TrainAgent):
                     actions_b = (
                         torch.from_numpy(action_trajs[inds]).float().to(self.device)
                     )
-                    reward_b = (
+                    rewards_b = (
                         torch.from_numpy(reward_trajs[inds]).float().to(self.device)
                     )
                     terminated_b = (
@@ -252,16 +248,13 @@ class TrainQSMDiffusionAgent(TrainAgent):
                         {"state": obs_b},
                         {"state": next_obs_b},
                         actions_b,
-                        reward_b,
+                        rewards_b,
                         terminated_b,
                         self.gamma,
                     )
                     self.critic_optimizer.zero_grad()
                     loss_critic.backward()
                     self.critic_optimizer.step()
-
-                    # update target q function
-                    self.model.update_target_critic(self.critic_tau)
 
                     # Update policy with collected trajectories
                     loss_actor = self.model.loss_actor(
@@ -277,6 +270,9 @@ class TrainQSMDiffusionAgent(TrainAgent):
                                 self.model.actor.parameters(), self.max_grad_norm
                             )
                         self.actor_optimizer.step()
+
+                    # update target critic
+                    self.model.update_target_critic(self.critic_tau)
 
             # Update lr
             self.actor_lr_scheduler.step()

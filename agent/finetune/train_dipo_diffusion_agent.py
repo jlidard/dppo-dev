@@ -218,35 +218,28 @@ class TrainDIPODiffusionAgent(TrainAgent):
                 num_batch = int(
                     self.n_steps * self.n_envs / self.batch_size * self.replay_ratio
                 )
+                # only worth converting first with parallel envs - large number of updates below
+                obs_array = np.array(obs_buffer)
+                next_obs_array = np.array(next_obs_buffer)
+                action_array = np.array(action_buffer)
+                reward_array = np.array(reward_buffer)
+                terminated_array = np.array(terminated_buffer)
 
                 # Critic learning
                 for _ in range(num_batch):
-                    # Sample batch
                     inds = np.random.choice(len(obs_buffer), self.batch_size)
-                    obs_b = (
-                        torch.from_numpy(np.array([obs_buffer[i] for i in inds]))
-                        .float()
-                        .to(self.device)
-                    )
+                    obs_b = torch.from_numpy(obs_array[inds]).float().to(self.device)
                     next_obs_b = (
-                        torch.from_numpy(np.array([next_obs_buffer[i] for i in inds]))
-                        .float()
-                        .to(self.device)
+                        torch.from_numpy(next_obs_array[inds]).float().to(self.device)
                     )
                     actions_b = (
-                        torch.from_numpy(np.array([action_buffer[i] for i in inds]))
-                        .float()
-                        .to(self.device)
+                        torch.from_numpy(action_array[inds]).float().to(self.device)
                     )
                     rewards_b = (
-                        torch.from_numpy(np.array([reward_buffer[i] for i in inds]))
-                        .float()
-                        .to(self.device)
+                        torch.from_numpy(reward_array[inds]).float().to(self.device)
                     )
                     terminated_b = (
-                        torch.from_numpy(np.array([terminated_buffer[i] for i in inds]))
-                        .float()
-                        .to(self.device)
+                        torch.from_numpy(terminated_array[inds]).float().to(self.device)
                     )
 
                     # Update critic
@@ -267,14 +260,10 @@ class TrainDIPODiffusionAgent(TrainAgent):
                     if self.itr >= self.n_critic_warmup_itr:
                         inds = np.random.choice(len(obs_buffer), self.batch_size)
                         obs_b = (
-                            torch.from_numpy(np.array([obs_buffer[i] for i in inds]))
-                            .float()
-                            .to(self.device)
+                            torch.from_numpy(obs_array[inds]).float().to(self.device)
                         )
                         actions_b = (
-                            torch.from_numpy(np.array([action_buffer[i] for i in inds]))
-                            .float()
-                            .to(self.device)
+                            torch.from_numpy(action_array[inds]).float().to(self.device)
                         )
 
                         # get Q-perturbed actions by optimizing
@@ -297,8 +286,6 @@ class TrainDIPODiffusionAgent(TrainAgent):
                                 max_norm=self.action_grad_norm,
                                 norm_type=2,
                             )
-
-                            # get the perturbed action
                             actions_optim.step()
 
                             actions_flat.requires_grad_(False)
@@ -309,8 +296,7 @@ class TrainDIPODiffusionAgent(TrainAgent):
                         guided_action_np = guided_action.detach().cpu().numpy()
 
                         # Add back to buffer
-                        for i, i_buf in enumerate(inds):
-                            action_buffer[i_buf] = guided_action_np[i]
+                        action_array[inds] = guided_action_np
 
                         # Update policy with collected trajectories
                         loss_actor = self.model.loss(
@@ -327,6 +313,11 @@ class TrainDIPODiffusionAgent(TrainAgent):
                     # Update target critic and actor
                     self.model.update_target_critic(self.target_ema_rate)
                     self.model.update_target_actor(self.target_ema_rate)
+
+                # convert back to buffer
+                action_buffer = deque(
+                    [action for action in action_array], maxlen=self.buffer_size
+                )
 
             # Update lr
             self.actor_lr_scheduler.step()
