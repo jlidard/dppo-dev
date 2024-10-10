@@ -11,6 +11,7 @@ from util.scheduler import CosineAnnealingWarmupRestarts
 log = logging.getLogger(__name__)
 from agent.finetune.train_agent import TrainAgent
 from util.reward_scaling import RunningRewardScaler
+from autoclip.torch import QuantileClip
 
 
 class TrainPPOAgent(TrainAgent):
@@ -59,6 +60,16 @@ class TrainPPOAgent(TrainAgent):
             min_lr=cfg.train.critic_lr_scheduler.min_lr,
             warmup_steps=cfg.train.critic_lr_scheduler.warmup_steps,
             gamma=1.0,
+        )
+        self.actor_optimizer = QuantileClip.as_optimizer(
+            optimizer=self.actor_optimizer,
+            quantile=0.9,
+            history_length=1000,
+        )
+        self.critic_optimizer = QuantileClip.as_optimizer(
+            optimizer=self.critic_optimizer,
+            quantile=0.9,
+            history_length=1000,
         )
 
         # Generalized advantage estimation

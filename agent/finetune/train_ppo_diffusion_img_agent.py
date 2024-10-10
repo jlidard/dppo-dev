@@ -350,11 +350,6 @@ class TrainPPOImgDiffusionAgent(TrainPPODiffusionAgent):
                         loss.backward()
                         if (batch + 1) % self.grad_accumulate == 0:
                             if self.itr >= self.n_critic_warmup_itr:
-                                if self.max_grad_norm is not None:
-                                    torch.nn.utils.clip_grad_norm_(
-                                        self.model.actor_ft.parameters(),
-                                        self.max_grad_norm,
-                                    )
                                 self.actor_optimizer.step()
                                 if (
                                     self.learn_eta

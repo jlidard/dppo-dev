@@ -93,7 +93,6 @@ class TrainAgent:
             if env_type == "furniture"
             else cfg.env.best_reward_threshold_for_success
         )
-        self.max_grad_norm = cfg.train.get("max_grad_norm", None)
 
         # Logging, rendering, checkpoints
         self.logdir = cfg.logdir

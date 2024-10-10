@@ -14,6 +14,7 @@ import wandb
 
 log = logging.getLogger(__name__)
 from util.timer import Timer
+from autoclip.torch import QuantileClip
 from agent.finetune.train_agent import TrainAgent
 from util.scheduler import CosineAnnealingWarmupRestarts
 
@@ -39,6 +40,11 @@ class TrainRWRDiffusionAgent(TrainAgent):
             min_lr=cfg.train.lr_scheduler.min_lr,
             warmup_steps=cfg.train.lr_scheduler.warmup_steps,
             gamma=1.0,
+        )
+        self.optimizer = QuantileClip.as_optimizer(
+            optimizer=self.optimizer,
+            quantile=0.9,
+            history_length=1000,
         )
 
         # Reward exponential
@@ -256,10 +262,6 @@ class TrainRWRDiffusionAgent(TrainAgent):
                         )
                         self.optimizer.zero_grad()
                         loss.backward()
-                        if self.max_grad_norm is not None:
-                            torch.nn.utils.clip_grad_norm_(
-                                self.model.parameters(), self.max_grad_norm
-                            )
                         self.optimizer.step()
 
             # Update lr

@@ -20,6 +20,7 @@ import wandb
 log = logging.getLogger(__name__)
 from util.timer import Timer
 from collections import deque
+from autoclip.torch import QuantileClip
 from agent.finetune.train_agent import TrainAgent
 from util.scheduler import CosineAnnealingWarmupRestarts
 
@@ -63,6 +64,16 @@ class TrainDQLDiffusionAgent(TrainAgent):
             min_lr=cfg.train.critic_lr_scheduler.min_lr,
             warmup_steps=cfg.train.critic_lr_scheduler.warmup_steps,
             gamma=1.0,
+        )
+        self.actor_optimizer = QuantileClip.as_optimizer(
+            optimizer=self.actor_optimizer,
+            quantile=0.9,
+            history_length=1000,
+        )
+        self.critic_optimizer = QuantileClip.as_optimizer(
+            optimizer=self.critic_optimizer,
+            quantile=0.9,
+            history_length=1000,
         )
 
         # Buffer size
@@ -223,10 +234,18 @@ class TrainDQLDiffusionAgent(TrainAgent):
                 for _ in range(num_batch):
                     inds = np.random.choice(len(obs_buffer), self.batch_size)
                     obs_b = torch.from_numpy(obs_array[inds]).float().to(self.device)
-                    next_obs_b = torch.from_numpy(next_obs_array[inds]).float().to(self.device)
-                    actions_b = torch.from_numpy(action_array[inds]).float().to(self.device)
-                    rewards_b = torch.from_numpy(reward_array[inds]).float().to(self.device)
-                    terminated_b = torch.from_numpy(terminated_array[inds]).float().to(self.device)
+                    next_obs_b = (
+                        torch.from_numpy(next_obs_array[inds]).float().to(self.device)
+                    )
+                    actions_b = (
+                        torch.from_numpy(action_array[inds]).float().to(self.device)
+                    )
+                    rewards_b = (
+                        torch.from_numpy(reward_array[inds]).float().to(self.device)
+                    )
+                    terminated_b = (
+                        torch.from_numpy(terminated_array[inds]).float().to(self.device)
+                    )
 
                     # Update critic
                     loss_critic = self.model.loss_critic(
@@ -250,10 +269,6 @@ class TrainDQLDiffusionAgent(TrainAgent):
                     )
                     loss_actor.backward()
                     if self.itr >= self.n_critic_warmup_itr:
-                        if self.max_grad_norm is not None:
-                            torch.nn.utils.clip_grad_norm_(
-                                self.model.actor.parameters(), self.max_grad_norm
-                            )
                         self.actor_optimizer.step()
 
                     # update target

@@ -19,6 +19,7 @@ import wandb
 log = logging.getLogger(__name__)
 from util.timer import Timer
 from collections import deque
+from autoclip.torch import QuantileClip
 from agent.finetune.train_agent import TrainAgent
 from util.scheduler import CosineAnnealingWarmupRestarts
 
@@ -63,6 +64,16 @@ class TrainDIPODiffusionAgent(TrainAgent):
             min_lr=cfg.train.critic_lr_scheduler.min_lr,
             warmup_steps=cfg.train.critic_lr_scheduler.warmup_steps,
             gamma=1.0,
+        )
+        self.actor_optimizer = QuantileClip.as_optimizer(
+            optimizer=self.actor_optimizer,
+            quantile=0.9,
+            history_length=1000,
+        )
+        self.critic_optimizer = QuantileClip.as_optimizer(
+            optimizer=self.critic_optimizer,
+            quantile=0.9,
+            history_length=1000,
         )
 
         # target update rate
@@ -304,10 +315,6 @@ class TrainDIPODiffusionAgent(TrainAgent):
                         )
                         self.actor_optimizer.zero_grad()
                         loss_actor.backward()
-                        if self.max_grad_norm is not None:
-                            torch.nn.utils.clip_grad_norm_(
-                                self.model.actor.parameters(), self.max_grad_norm
-                            )
                         self.actor_optimizer.step()
 
                     # Update target critic and actor

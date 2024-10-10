@@ -12,6 +12,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
 ]
 dependencies = [
+    "autoclip==0.2.1",
     "av==12.3.0",
     "einops==0.8.0",
     "gdown==5.2.0",

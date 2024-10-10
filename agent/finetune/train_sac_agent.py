@@ -14,6 +14,7 @@ from collections import deque
 
 log = logging.getLogger(__name__)
 from util.timer import Timer
+from autoclip.torch import QuantileClip
 from agent.finetune.train_agent import TrainAgent
 
 
@@ -32,6 +33,16 @@ class TrainSACAgent(TrainAgent):
         self.critic_optimizer = torch.optim.Adam(
             self.model.critic.parameters(),
             lr=cfg.train.critic_lr,
+        )
+        self.actor_optimizer = QuantileClip.as_optimizer(
+            optimizer=self.actor_optimizer,
+            quantile=0.9,
+            history_length=1000,
+        )
+        self.critic_optimizer = QuantileClip.as_optimizer(
+            optimizer=self.critic_optimizer,
+            quantile=0.9,
+            history_length=1000,
         )
 
         # Perturbation scale

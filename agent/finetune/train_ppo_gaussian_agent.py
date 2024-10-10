@@ -319,10 +319,6 @@ class TrainPPOGaussianAgent(TrainPPOAgent):
                         self.critic_optimizer.zero_grad()
                         loss.backward()
                         if self.itr >= self.n_critic_warmup_itr:
-                            if self.max_grad_norm is not None:
-                                torch.nn.utils.clip_grad_norm_(
-                                    self.model.actor_ft.parameters(), self.max_grad_norm
-                                )
                             self.actor_optimizer.step()
                         self.critic_optimizer.step()
                         log.info(
