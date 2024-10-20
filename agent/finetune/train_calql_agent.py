@@ -353,7 +353,6 @@ class TrainCalQLAgent(TrainAgent):
 
                     # Sample from ONLINE buffer
                     if self.train_online:
-                        print(_)
                         inds = np.random.choice(len(obs_buffer), self.batch_size // 2)
                         obs_b_on = (
                             torch.from_numpy(obs_array[inds]).float().to(self.device)
