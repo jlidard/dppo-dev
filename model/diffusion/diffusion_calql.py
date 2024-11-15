@@ -1,5 +1,5 @@
 """
-Calibrated Conservative Q-Learning (CalQL) for Gaussian policy.
+Calibrated Conservative Q-Learning (CalQL) for Diffusion Policy.
 
 """
 

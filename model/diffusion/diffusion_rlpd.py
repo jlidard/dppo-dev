@@ -1,5 +1,5 @@
 """
-Reinforcement learning with prior data (RLPD) for Diffusion policy.
+Reinforcement learning with prior data (RLPD) for Diffusion Policy.
 
 Use ensemble of critics.
 

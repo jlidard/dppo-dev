@@ -1,5 +1,5 @@
 """
-Imitation Bootstrapped Reinforcement Learning (IBRL) for Diffusion policy.
+Imitation Bootstrapped Reinforcement Learning (IBRL) for Diffusion Policy.
 
 """
 
