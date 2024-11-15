@@ -113,7 +113,7 @@ class IBRL_Diffusion(RWRDiffusion):
         return loss_critic
 
     def loss_actor(self, obs):
-        action = self.forward_train(
+        action = self.forward(
             obs,
             deterministic=False,
         )  # use online policy only, also IBRL does not use tanh squashing
@@ -149,7 +149,6 @@ class IBRL_Diffusion(RWRDiffusion):
         self,
         cond,
         deterministic=False,
-        reparameterize=False,
     ):
         """use both pre-trained and online policies"""
         q1_ind, q2_ind = self.get_random_indices()
@@ -162,7 +161,7 @@ class IBRL_Diffusion(RWRDiffusion):
         )
 
         # sample an action from the RL policy
-        rl_action = super().forward(
+        rl_action = self.forward_sample(
             cond=cond,
             deterministic=deterministic,
         )
@@ -203,7 +202,6 @@ class IBRL_Diffusion(RWRDiffusion):
         return action
 
     # override
-    @torch.no_grad()
     def forward_sample(
         self,
         cond,
@@ -243,44 +241,4 @@ class IBRL_Diffusion(RWRDiffusion):
                 x = torch.clamp(
                     x, -self.final_action_clip_value, self.final_action_clip_value
                 )
-        return x
-
-    def forward_train(
-        self,
-        cond,
-        deterministic=False,
-    ):
-        """
-        Differentiable forward pass used in actor training.
-        """
-        device = self.betas.device
-        B = len(cond["state"])
-
-        # Loop
-        x = torch.randn((B, self.horizon_steps, self.action_dim), device=device)
-        t_all = list(reversed(range(self.denoising_steps)))
-        for i, t in enumerate(t_all):
-            t_b = make_timesteps(B, t, device)
-            mean, logvar = self.p_mean_var(
-                x=x,
-                t=t_b,
-                cond=cond,
-            )
-            std = torch.exp(0.5 * logvar)
-
-            # Determine the noise level
-            if deterministic and t == 0:
-                std = torch.zeros_like(std)
-            elif deterministic:  # For DDPM, sample with noise
-                std = torch.clip(std, min=1e-3)
-            else:
-                std = torch.clip(std, min=self.min_sampling_denoising_std)
-            noise = torch.randn_like(x).clamp_(
-                -self.randn_clip_value, self.randn_clip_value
-            )
-            x = mean + std * noise
-
-            # clamp action at final step
-            if self.final_action_clip_value and i == len(t_all) - 1:
-                x = torch.clamp(x, -1, 1)
         return x
