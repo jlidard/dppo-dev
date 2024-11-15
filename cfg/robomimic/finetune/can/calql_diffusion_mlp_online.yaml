@@ -76,10 +76,10 @@ train:
   n_random_actions: 4
   target_ema_rate: 0.005
   scale_reward_factor: 1.0
-  num_update: 3 # 1000
+  num_update: 1000
   buffer_size: 1000000
   online_utd_ratio: 1
-  n_eval_episode: 3 # 40
+  n_eval_episode: 40
   n_explore_steps: 0
 
 model:
