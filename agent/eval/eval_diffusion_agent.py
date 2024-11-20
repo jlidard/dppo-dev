@@ -141,5 +141,6 @@ class EvalDiffusionAgent(EvalAgent):
             eval_success_rate=success_rate,
             eval_episode_reward=avg_episode_reward,
             eval_best_reward=avg_best_reward,
+            obs_full_trajs=obs_full_trajs,
             time=time,
         )

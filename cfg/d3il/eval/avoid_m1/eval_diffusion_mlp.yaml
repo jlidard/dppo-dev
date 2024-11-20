@@ -9,19 +9,21 @@ name: ${env_name}_eval_diffusion_mlp_ta${horizon_steps}_td${denoising_steps}
 logdir: ${oc.env:DPPO_LOG_DIR}/d3il-eval/${name}/${now:%Y-%m-%d}_${now:%H-%M-%S}_${seed}
 base_policy_path:
 normalization_path: ${oc.env:DPPO_DATA_DIR}/d3il/avoid_m1/normalization.npz
+# normalization_path: ${oc.env:DPPO_DATA_DIR}/d3il/avoid_m2/normalization.npz
+# normalization_path: ${oc.env:DPPO_DATA_DIR}/d3il/avoid_m3/normalization.npz
 
 seed: 42
 device: cuda:0
 env_name: avoiding-m5
 obs_dim: 4
 action_dim: 2
-denoising_steps: 20
+denoising_steps: 100
 cond_steps: 1
 horizon_steps: 4
 act_steps: 4
 
 n_steps: 25
-render_num: 40
+render_num: 50
 
 plotter:
   _target_: env.plot_traj.TrajPlotter
@@ -29,7 +31,7 @@ plotter:
   normalization_path: ${normalization_path}
 
 env:
-  n_envs: 40
+  n_envs: 50
   name: ${env_name}
   max_episode_steps: 100
   reset_at_iteration: True
@@ -50,6 +52,16 @@ model:
   _target_: model.diffusion.diffusion.DiffusionModel
   predict_epsilon: True
   denoised_clip_value: 1.0
+  use_ddim: True
+  ddim_steps: 10
+  eta:
+    base_eta: 0
+    input_dim: ${obs_dim}
+    mlp_dims: [256, 256]
+    action_dim: ${action_dim}
+    min_eta: 0.
+    max_eta: 1.0
+    _target_: model.diffusion.eta.EtaFixed
   #
   network_path: ${base_policy_path}
   network:
