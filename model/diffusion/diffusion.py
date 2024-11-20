@@ -48,6 +48,7 @@ class DiffusionModel(nn.Module):
         use_ddim=False,
         ddim_discretize="uniform",
         ddim_steps=None,
+        eta=None,
         **kwargs,
     ):
         super().__init__()
@@ -195,6 +196,12 @@ class DiffusionModel(nn.Module):
             )
             self.ddim_sigmas = torch.flip(self.ddim_sigmas, [0])
 
+        if eta is not None:
+            self.eta = eta.to(self.device)
+            for param in self.eta.parameters():
+                param.requires_grad = False
+            logging.info("Turned off gradients for eta")
+
     # ---------- Sampling ----------#
 
     def p_mean_var(self, x, t, cond, index=None, network_override=None):
@@ -242,9 +249,14 @@ class DiffusionModel(nn.Module):
 
             eta=0
             """
-            sigma = extract(self.ddim_sigmas, index, x.shape)
-            dir_xt = (1.0 - alpha_prev - sigma**2).sqrt() * noise
-            mu = (alpha_prev**0.5) * x_recon + dir_xt
+            # sigma = extract(self.ddim_sigmas, index, x.shape)
+            etas = self.eta(cond).unsqueeze(1)  # B x 1 x (Da or 1)
+            sigma = (
+                etas
+                * ((1 - alpha_prev) / (1 - alpha) * (1 - alpha / alpha_prev)) ** 0.5
+            ).clamp_(min=1e-10)
+            dir_xt_coef = (1.0 - alpha_prev - sigma**2).clamp_(min=0).sqrt()
+            mu = (alpha_prev**0.5) * x_recon + dir_xt_coef * noise
             var = sigma**2
             logvar = torch.log(var)
         else:
@@ -294,7 +306,14 @@ class DiffusionModel(nn.Module):
 
             # Determine noise level
             if self.use_ddim:
-                std = torch.zeros_like(std)
+                # only noise at the last step, higher
+                if i < (len(t_all) - 1):
+                    std = torch.zeros_like(std)
+                else:
+                    std = torch.clip(std, min=0.05)
+                
+                # add noise at all steps, higher (ours)
+                # std = torch.clip(std, min=0.05)
             else:
                 if t == 0:
                     std = torch.zeros_like(std)
