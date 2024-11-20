@@ -37,6 +37,7 @@ class VPGDiffusion(DiffusionModel):
         # modifying denoising schedule
         min_sampling_denoising_std=0.1,
         min_logprob_denoising_std=0.1,
+        only_add_noise_last=False,
         # eta in DDIM
         eta=None,
         learn_eta=False,
@@ -62,6 +63,9 @@ class VPGDiffusion(DiffusionModel):
 
         # Minimum std used in calculating denoising logprobs - for stability
         self.min_logprob_denoising_std = min_logprob_denoising_std
+
+        # Only add noise to the last denoising step
+        self.only_add_noise_last = only_add_noise_last
 
         # Learnable eta
         self.learn_eta = learn_eta
@@ -283,7 +287,13 @@ class VPGDiffusion(DiffusionModel):
                 if deterministic:
                     std = torch.zeros_like(std)
                 else:
-                    std = torch.clip(std, min=min_sampling_denoising_std)
+                    if self.only_add_noise_last and i < (len(t_all) - 1):
+                        # std = torch.zeros_like(std)
+                        # std = torch.ones_like(std) * 1e-3
+                        std = torch.clip(std, max=1e-3)
+                        # std = std
+                    else:
+                        std = torch.clip(std, min=min_sampling_denoising_std)
             else:
                 if deterministic and t == 0:
                     std = torch.zeros_like(std)
