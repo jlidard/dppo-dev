@@ -3,18 +3,18 @@ defaults:
 hydra:
   run:
     dir: ${logdir}
-_target_: agent.finetune.train_calql_diffusion_agent.TrainCalQLDiffusionAgent
+_target_: agent.finetune.train_ibrl_diffusion_agent.TrainIBRLDiffusionAgent
 
-name: ${env_name}_calql_mlp_ta${horizon_steps}
-logdir: ${oc.env:DPPO_LOG_DIR}/robomimic-pretrain/${name}/${now:%Y-%m-%d}_${now:%H-%M-%S}_${seed}
+name: ${env_name}_ibrl_mlp_ta${horizon_steps}
+logdir: ${oc.env:DPPO_LOG_DIR}/robomimic-finetune/${name}/${now:%Y-%m-%d}_${now:%H-%M-%S}_${seed}
 robomimic_env_cfg_path: cfg/robomimic/env_meta/${env_name}.json
-normalization_path: ${oc.env:DPPO_DATA_DIR}/robomimic/${env_name}/normalization.npz
-offline_dataset_path: ${oc.env:DPPO_DATA_DIR}/robomimic/${env_name}/train.npz
+normalization_path: ${oc.env:DPPO_DATA_DIR}/robomimic/${env_name}-ph/normalization.npz
+offline_dataset_path: ${oc.env:DPPO_DATA_DIR}/robomimic/${env_name}-ph/train.npz
 base_policy_path: 
 
 seed: 42
 device: cuda:0
-env_name: square
+env_name: can
 obs_dim: 23
 action_dim: 7
 denoising_steps: 10
@@ -22,13 +22,14 @@ cond_steps: 1
 horizon_steps: 1
 act_steps: 1
 
+
 env:
   n_envs: 1
   name: ${env_name}
-  best_reward_threshold_for_success: 1
-  max_episode_steps: 300
+  max_episode_steps: 250  # IBRL uses 200
   reset_at_iteration: False
   save_video: False
+  best_reward_threshold_for_success: 1
   wrappers:
     robomimic_lowdim:
       normalization_path: ${normalization_path}
@@ -44,13 +45,12 @@ env:
 
 wandb:
   entity: ${oc.env:DPPO_WANDB_ENTITY}
-  project: diffusion-calql-${env_name}-act-${act_steps}
+  project: diffusion-ibrl-ph-${env_name}-act-${act_steps}
   run: ${now:%H-%M-%S}_${name}
 
 train:
-  n_train_itr: 10000
-  n_steps: 1  # not used
-  n_episode_per_epoch: 1
+  n_train_itr: 1000000
+  n_steps: 1
   gamma: 0.99
   actor_lr: 1e-4
   actor_weight_decay: 0
@@ -58,51 +58,49 @@ train:
     first_cycle_steps: 1000
     warmup_steps: 10
     min_lr: 1e-4
-  critic_lr: 3e-4
+  critic_lr: 1e-4
   critic_weight_decay: 0
   critic_lr_scheduler:
     first_cycle_steps: 1000
     warmup_steps: 10
-    min_lr: 3e-4
-  save_model_freq: 100
-  val_freq: 10
+    min_lr: 1e-4
+  save_model_freq: 50000
+  val_freq: 10000
   render:
-    freq: 1
+    freq: 10000
     num: 0
-  log_freq: 1
-  # CalQL specific
-  train_online: True
+  log_freq: 200
+  # IBRL specific
   batch_size: 256
-  n_random_actions: 4
-  target_ema_rate: 0.005
-  scale_reward_factor: 1.0
-  num_update: 1000
-  buffer_size: 1000000
-  online_utd_ratio: 1
+  target_ema_rate: 0.01
+  scale_reward_factor: 1
+  critic_num_update: 3
+  buffer_size: 400000
   n_eval_episode: 40
   n_explore_steps: 0
+  update_freq: 2
 
 model:
-  _target_: model.diffusion.diffusion_calql.CalQL_Diffusion
+  _target_: model.diffusion.diffusion_ibrl.IBRL_Diffusion
   randn_clip_value: 3
-  cql_min_q_weight: 5.0
-  tanh_output: True
+  n_critics: 5
+  soft_action_sample: True
+  soft_action_sample_beta: 10
   network_path: ${base_policy_path}
   actor:
     _target_: model.diffusion.mlp_diffusion.DiffusionMLP
-    time_dim: 32
-    mlp_dims: [1024, 1024, 1024]
-    cond_mlp_dims: [512, 64]
+    time_dim: 16
+    mlp_dims: [512, 512, 512]
     residual_style: True
     cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
     horizon_steps: ${horizon_steps}
     action_dim: ${action_dim}
   critic:
     _target_: model.common.critic.CriticObsAct
-    mlp_dims: [1024, 1024, 1024]
+    mlp_dims: [256, 256, 256]
     activation_type: ReLU
     use_layernorm: True
-    double_q: True
+    double_q: False # use ensemble
     cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
     action_dim: ${action_dim}
     action_steps: ${act_steps}
@@ -118,5 +116,4 @@ offline_dataset:
   horizon_steps: ${horizon_steps}
   cond_steps: ${cond_steps}
   device: ${device}
-  discount_factor: ${train.gamma}
-  get_mc_return: True
+  max_n_episodes: 100

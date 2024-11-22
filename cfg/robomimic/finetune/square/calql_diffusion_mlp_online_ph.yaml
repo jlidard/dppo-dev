@@ -8,8 +8,8 @@ _target_: agent.finetune.train_calql_diffusion_agent.TrainCalQLDiffusionAgent
 name: ${env_name}_calql_mlp_ta${horizon_steps}
 logdir: ${oc.env:DPPO_LOG_DIR}/robomimic-pretrain/${name}/${now:%Y-%m-%d}_${now:%H-%M-%S}_${seed}
 robomimic_env_cfg_path: cfg/robomimic/env_meta/${env_name}.json
-normalization_path: ${oc.env:DPPO_DATA_DIR}/robomimic/${env_name}/normalization.npz
-offline_dataset_path: ${oc.env:DPPO_DATA_DIR}/robomimic/${env_name}/train.npz
+normalization_path: ${oc.env:DPPO_DATA_DIR}/robomimic/${env_name}-ph/normalization.npz
+offline_dataset_path: ${oc.env:DPPO_DATA_DIR}/robomimic/${env_name}-ph/train.npz
 base_policy_path: 
 
 seed: 42
@@ -44,7 +44,7 @@ env:
 
 wandb:
   entity: ${oc.env:DPPO_WANDB_ENTITY}
-  project: diffusion-calql-${env_name}-act-${act_steps}
+  project: diffusion-calql-ph-${env_name}-act-${act_steps}
   run: ${now:%H-%M-%S}_${name}
 
 train:

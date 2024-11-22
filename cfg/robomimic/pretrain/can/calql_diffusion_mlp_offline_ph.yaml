@@ -8,13 +8,12 @@ _target_: agent.finetune.train_calql_diffusion_agent.TrainCalQLDiffusionAgent
 name: ${env_name}_calql_mlp_ta${horizon_steps}
 logdir: ${oc.env:DPPO_LOG_DIR}/robomimic-pretrain/${name}/${now:%Y-%m-%d}_${now:%H-%M-%S}_${seed}
 robomimic_env_cfg_path: cfg/robomimic/env_meta/${env_name}.json
-normalization_path: ${oc.env:DPPO_DATA_DIR}/robomimic/${env_name}/normalization.npz
-offline_dataset_path: ${oc.env:DPPO_DATA_DIR}/robomimic/${env_name}/train.npz
-base_policy_path: 
+normalization_path: ${oc.env:DPPO_DATA_DIR}/robomimic/${env_name}-ph/normalization.npz
+offline_dataset_path: ${oc.env:DPPO_DATA_DIR}/robomimic/${env_name}-ph/train.npz
 
 seed: 42
 device: cuda:0
-env_name: square
+env_name: can
 obs_dim: 23
 action_dim: 7
 denoising_steps: 10
@@ -44,13 +43,12 @@ env:
 
 wandb:
   entity: ${oc.env:DPPO_WANDB_ENTITY}
-  project: diffusion-calql-${env_name}-act-${act_steps}
+  project: diffusion-ph-calql-${env_name}-act-${act_steps}
   run: ${now:%H-%M-%S}_${name}
 
 train:
-  n_train_itr: 10000
-  n_steps: 1  # not used
-  n_episode_per_epoch: 1
+  n_train_itr: 1000
+  n_steps: 1
   gamma: 0.99
   actor_lr: 1e-4
   actor_weight_decay: 0
@@ -65,20 +63,19 @@ train:
     warmup_steps: 10
     min_lr: 3e-4
   save_model_freq: 100
-  val_freq: 10
+  val_freq: 20
   render:
     freq: 1
     num: 0
   log_freq: 1
   # CalQL specific
-  train_online: True
+  train_online: False
   batch_size: 256
-  n_random_actions: 4
+  n_random_actions: 10
   target_ema_rate: 0.005
   scale_reward_factor: 1.0
   num_update: 1000
   buffer_size: 1000000
-  online_utd_ratio: 1
   n_eval_episode: 40
   n_explore_steps: 0
 
@@ -87,19 +84,17 @@ model:
   randn_clip_value: 3
   cql_min_q_weight: 5.0
   tanh_output: True
-  network_path: ${base_policy_path}
   actor:
     _target_: model.diffusion.mlp_diffusion.DiffusionMLP
-    time_dim: 32
-    mlp_dims: [1024, 1024, 1024]
-    cond_mlp_dims: [512, 64]
+    time_dim: 16
+    mlp_dims: [512, 512, 512]
     residual_style: True
     cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
     horizon_steps: ${horizon_steps}
     action_dim: ${action_dim}
   critic:
     _target_: model.common.critic.CriticObsAct
-    mlp_dims: [1024, 1024, 1024]
+    mlp_dims: [256, 256, 256]
     activation_type: ReLU
     use_layernorm: True
     double_q: True
