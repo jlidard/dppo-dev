@@ -1,5 +1,5 @@
 """
-DPPO: Diffusion Policy Policy Optimization. 
+DPPO: Diffusion Policy Policy Optimization with summed likelihood. 
 
 K: number of denoising steps
 To: observation sequence length
@@ -81,7 +81,6 @@ class PPODiffusionSumLikelihood(VPGDiffusion):
         use_bc_loss: whether to add BC regularization loss
         reward_horizon: action horizon that backpropagates gradient
         """
-        # Get new logprobs for denoising steps from T-1 to 0 - entropy is fixed fod diffusion
         # repeat the obs for each denoising step
         B = chains_next.shape[0]
         obs_repeat = {
